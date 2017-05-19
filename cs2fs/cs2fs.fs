@@ -38,11 +38,11 @@ let rec convertNode debug (tabs: int) (node: SyntaxNode) =
     | ClassDeclarationSyntax(attrs,keyword,ident,typePars,bases,constrs,_,members,_,_) -> 
         printnl <| "type " + ident.Text + "() =" <| (members |> Seq.map descendInd |> delim newline)
     | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,ident,typePars,pars,typeParsConstrs,block,arrowExpr,_) -> 
-        printnl <| "member this." + ident.Text + (descend pars) + (descend block) <| ""
-    // | :? ParameterListSyntax as x -> printJoin ", " <| "(" <| ")"
+        printnl <| "member this." + ident.Text + (descend pars) + " = " <| (descendInd block)
+    | ParameterListSyntax(left, right) -> print <| left.Text + right.Text <| ""
     // | :? ParameterSyntax as x -> print <| x.Identifier.Text <| ""
     // | :? PredefinedTypeSyntax as x -> print <| " : " + x.Keyword.Text <| ""
-    // | :? BlockSyntax as x -> print <| " =" <| ""
+    | BlockSyntax(_,stmts,_) -> stmts |> Seq.map descend |> delim newline
     // | :? ReturnStatementSyntax as x -> printnl "" ""
     // | :? BinaryExpressionSyntax as x -> printJoin (x.OperatorToken.Text) "" ""
     // | :? IdentifierNameSyntax as x -> print (if x.Parent :? VariableDeclarationSyntax then "" else x.Identifier.Text) ""
