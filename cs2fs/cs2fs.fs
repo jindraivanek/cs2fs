@@ -2,23 +2,24 @@ module cs2fs
 
 open Microsoft.CodeAnalysis
 open Microsoft.CodeAnalysis.CSharp
-open Fantomas
-open Microsoft.FSharp.Compiler
-
-let pick f xs =
-    let rec pick' f xs acc =
-        match xs with
-        | [] -> None
-        | x::tail -> if f x then Some (x, (List.rev acc @ tail)) else pick' f tail (x::acc)
-    pick' f xs []
-
-let concat s2 (s1,l1) = s1 + s2, l1 
 
 let newline = System.Environment.NewLine
 
 let surround head tail body = head + body + tail
 
 let delim sep xs = xs |> String.concat sep
+
+let (|VariableDeclarationSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
+    match node with
+    | :? Microsoft.CodeAnalysis.CSharp.Syntax.VariableDeclarationSyntax as node ->
+      Some (node.Type, node.Variables |> Seq.toList)
+    | _ -> None
+    
+let (|ParameterListSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
+    match node with
+    | :? Microsoft.CodeAnalysis.CSharp.Syntax.ParameterListSyntax as node ->
+      Some (node.OpenParenToken, node.Parameters |> Seq.toList, node.CloseParenToken)
+    | _ -> None
 
 let rec convertNode debug (tabs: int) (node: SyntaxNode) =
     let descend n = convertNode debug tabs n
@@ -31,30 +32,44 @@ let rec convertNode debug (tabs: int) (node: SyntaxNode) =
             s) 
         + postfix
         + if debug then "§" else ""
-    let print = print' 0 false
-    let printnl = print' 0 true
+    let print = print' 0 false ""
+    let printnl = print' 0 true ""
+    let printnlAndThen = print' 0 true
+
+    let printType (n:Syntax.TypeSyntax) =
+        let t = n.ToString()
+        if n.IsVar then "" else (" : " + t)
 
     match node with
-    | ClassDeclarationSyntax(attrs,keyword,ident,typePars,bases,constrs,_,members,_,_) -> 
-        printnl <| "type " + ident.Text + "() =" <| (members |> Seq.map descendInd |> delim newline)
+    | CompilationUnitSyntax(aliases, usings, attrs, members, _) ->
+         print (members |> Seq.map descend |> delim "")
+    | ClassDeclarationSyntax(attrs,keyword,ident,typePars,bases,constrs,_,members,_,_) ->
+        printnlAndThen <| "type " + ident.Text + "() =" <| (members |> Seq.map descendInd |> delim newline)
     | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,ident,typePars,pars,typeParsConstrs,block,arrowExpr,_) -> 
-        printnl <| "member this." + ident.Text + (descend pars) + " = " <| (descendInd block)
-    | ParameterListSyntax(left, right) -> print <| left.Text + right.Text <| ""
-    // | :? ParameterSyntax as x -> print <| x.Identifier.Text <| ""
-    // | :? PredefinedTypeSyntax as x -> print <| " : " + x.Keyword.Text <| ""
-    | BlockSyntax(_,stmts,_) -> stmts |> Seq.map descend |> delim newline
-    // | :? ReturnStatementSyntax as x -> printnl "" ""
-    // | :? BinaryExpressionSyntax as x -> printJoin (x.OperatorToken.Text) "" ""
-    // | :? IdentifierNameSyntax as x -> print (if x.Parent :? VariableDeclarationSyntax then "" else x.Identifier.Text) ""
-    // | :? LiteralExpressionSyntax as x -> print (x.Token.Text) ""
-    // | :? LocalDeclarationStatementSyntax as x -> printnl "let " ""
-    // | :? VariableDeclarationSyntax as x -> print "" ""
-    // | :? VariableDeclaratorSyntax as x -> print (x.Identifier.Text) ""
-    // | :? EqualsValueClauseSyntax as x -> print " = " ""
-    | _ -> printnl <| "[!" + node.GetType().ToString() + "!]" <| ""
+        printnlAndThen <| "member this." + ident.Text + (descend pars) + " = " <| (descendInd block)
+    | ParameterListSyntax(left, prms, right) as x ->
+        print <| left.Text + (prms |> Seq.map descend |> delim ", ") + right.Text
+    | ParameterSyntax(attrs, typ, ident, _) ->
+        print <| ident.Text + printType typ
+    | BlockSyntax(_x,stmts,_) -> stmts |> Seq.map (fun x -> printnl (descend x)) |> delim ""
+    | ReturnStatementSyntax(_,e,_) -> print (descend e)
+    | BinaryExpressionSyntax(e1,op,e2) -> print <| ([descend e1; op.Text; descend e2] |> delim " ")
+    | IdentifierNameSyntax(token) -> print token.Text
+    | LiteralExpressionSyntax(token) -> print (token.Text)
+    | LocalDeclarationStatementSyntax(isConst,varDecl,_) ->
+        print <| "let " + descend varDecl
+    | VariableDeclarationSyntax(typ, vars) ->
+        vars |> Seq.map
+            (function
+             | VariableDeclaratorSyntax(ident, args, init) -> ident.Text + printType typ + descend init
+             | x -> descend x)
+        |> delim ", " |> print
+    | VariableDeclaratorSyntax(ident, args, init) -> print <| ident.Text + descend init
+    | EqualsValueClauseSyntax(eqToken, value) -> print <| " " + eqToken.Text + " " + descend value
+    | _ -> printnl <| "[!" + node.GetType().ToString() + "!]"
 
 let convert debug (csTree: SyntaxTree) =
-    csTree.GetRoot().ChildNodes() |> Seq.map (convertNode debug 0) |> String.concat ""
+    csTree.GetRoot() |> convertNode debug 0
 
 let input = @"
     public class MyClass
@@ -69,7 +84,6 @@ let input = @"
 
 [<EntryPoint>]
 let main argv =
-    printfn "%A" argv
-    CSharpSyntaxTree.ParseText(input) |> convert true |> (printfn "%s")
+    //CSharpSyntaxTree.ParseText(input) |> convert true |> (printfn "%s")
     CSharpSyntaxTree.ParseText(input) |> convert false |> (printfn "%s")
     0 // return an integer exit code
