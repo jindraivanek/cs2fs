@@ -1,5 +1,3 @@
 FSharp.Core
 Microsoft.CodeAnalysis.CSharp
 Microsoft.CodeAnalysis.ActivePatterns
-Fantomas
-FSharp.Compiler.Service

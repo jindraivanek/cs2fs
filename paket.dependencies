@@ -3,5 +3,3 @@ nuget FAKE
 nuget FSharp.Core
 nuget Microsoft.CodeAnalysis.CSharp
 nuget Microsoft.CodeAnalysis.ActivePatterns
-nuget Fantomas
-nuget FSharp.Compiler.Service
