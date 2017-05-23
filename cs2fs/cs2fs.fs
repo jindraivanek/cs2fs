@@ -55,11 +55,17 @@ let (|ParameterListSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     | :? Microsoft.CodeAnalysis.CSharp.Syntax.ParameterListSyntax as node ->
       Some (node.OpenParenToken, node.Parameters |> Seq.toList, node.CloseParenToken)
     | _ -> None
+    
+let rec getParentOfType<'t when 't :> SyntaxNode> (node: SyntaxNode) =
+    match node.Parent with
+    | null -> None
+    | :? 't as p -> Some p
+    | p -> getParentOfType p
 
-let rec convertNode debug (node: SyntaxNode) =
-    let descend n = convertNode debug n
-    let descendOption n def = defaultArg (n |> Option.map (convertNode debug)) def
-    let descendInd n = convertNode debug n |> IndentBlock
+let rec convertNode debug (model: SemanticModel) (node: SyntaxNode) =
+    let descend n = convertNode debug model n
+    let descendOption n def = defaultArg (n |> Option.map (convertNode debug model)) def
+    let descendInd n = convertNode debug model n |> IndentBlock
     let Text s = 
         ((if debug then "§" else "") +
         (sprintf "%s%s"
@@ -95,7 +101,11 @@ let rec convertNode debug (node: SyntaxNode) =
     | ReturnStatementSyntax(_,e,_) -> descend e
     | BinaryExpressionSyntax(e1,op,e2) -> [descend e1; Text (" " + op.Text + " "); descend e2] |> block
     | AssignmentExpressionSyntax(e1,op,e2) -> [descend e1; Text (" <- "); descend e2] |> block
-    | IdentifierNameSyntax(token) -> Text token.Text
+    | IdentifierNameSyntax(token) as n -> 
+        let identInfo = model.GetSymbolInfo n
+        let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text)
+        let isThis = identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(token.Text.StartsWith("this."))
+        Text <| (if isThis then "this." else "") +  token.Text
     | LiteralExpressionSyntax(token) -> Text (token.Text)
     | ExpressionStatementSyntax(_,expr,_) -> descend expr
     | LocalDeclarationStatementSyntax(isConst,varDecl,_) ->
@@ -124,12 +134,16 @@ let rec convertNode debug (node: SyntaxNode) =
             LineText ("member this." + ident.Text)
                 |+>| ((LineText "with get() = " |+>| descend getBlock) 
                       |++| (LineText "and set(value) = " |+>| descend setBlock))
-    | FieldDeclarationSyntax(attrs,varDecl,_) -> Text "member this." |++| descend varDecl |> newline 
+    | FieldDeclarationSyntax(attrs,varDecl,_) -> 
+        Text "member val " |++| descend varDecl |++| Text " with get, set" |> newline 
     | _ -> LineText <| "[!" + node.GetType().ToString() + "!]"
     | :? Syntax.IdentifierNameSyntax -> Text ""
 
 let convert debug (csTree: SyntaxTree) =
-    csTree.GetRoot() |> convertNode debug
+    let mscorlib = MetadataReference.CreateFromFile(typeof<obj>.Assembly.Location)
+    let compilation = CSharpCompilation.Create("MyCompilation", syntaxTrees = [| csTree |], references = [| mscorlib |])
+    let model = compilation.GetSemanticModel(csTree, true)
+    csTree.GetRoot() |> convertNode debug model
 
 let input = @"
     public class MyClass
@@ -138,7 +152,7 @@ let input = @"
         public int PropGet { get; }
         public int Field;
         public int PropGet2 { get {return Field;} }
-        public int PropGetSet { get {return Field;} set {Field = value;} }
+        public int PropGetSet { get {var x=1; return x;} set {Field = value;} }
         
         public int MyMethod(int x, string s)
         {
@@ -150,7 +164,8 @@ let input = @"
 
 [<EntryPoint>]
 let main argv =
-    CSharpSyntaxTree.ParseText(input) |> convert true |> printBlock |> (printfn "%s")
-    CSharpSyntaxTree.ParseText(input) |> convert false |> (printfn "%A")
-    CSharpSyntaxTree.ParseText(input) |> convert false |> printBlock |> (printfn "%s")
+    let tree = CSharpSyntaxTree.ParseText(input)
+    tree |> convert true |> printBlock |> (printfn "%s")
+    tree |> convert false |> (printfn "%A")
+    tree |> convert false |> printBlock |> (printfn "%s")
     0 // return an integer exit code
