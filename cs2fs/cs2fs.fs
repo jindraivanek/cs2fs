@@ -130,8 +130,42 @@ let rec convertNode debug (model: SemanticModel) (node: SyntaxNode) =
         | "!=" -> "<>"
         | x -> x
         
+    let getConvertedType (n: SyntaxNode) =
+        let t = model.GetTypeInfo(n)
+        let typ = if t.Type <> t.ConvertedType then t.ConvertedType else t.Type 
+        let typeName =
+            match typ.SpecialType with
+            | SpecialType.System_Object -> "obj"
+            | SpecialType.System_String -> "string"
+            | SpecialType.None -> typ.Name
+            | _ -> typ.Name
+        typeName
+    
+    let haveConvertedType (n: SyntaxNode) = 
+        let t = model.GetTypeInfo(n)
+        t.Type <> t.ConvertedType
+    
+    let implicitConv (n: SyntaxNode) =
+        let ignoredConvs = ["IEnumerabe"] |> set
+        match n with
+        | null -> Text ""
+        | _ ->
+            let typeName = 
+                if haveConvertedType n then 
+                    let t = getConvertedType n
+                    if Set.contains t ignoredConvs then None else Some t 
+                else None
+            Text (defaultArg (typeName |> Option.map (fun x -> "(" + x + ")")) "")
+        
+    implicitConv node |++|
     match node with
     | null -> Text ""
+    
+    | ParenthesizedExpressionSyntax(left,AssignmentExpressionSyntax(e1,_,e2),right) -> 
+        [Text left.Text; descend e1; Text " <- "; descend e2; Text "; "; descend e1; Text right.Text] |> block
+    | BinaryExpressionSyntax(e1,op,e2) when op.Text = "+" && getConvertedType e1 = "string" && getConvertedType e2 = "obj" -> 
+        [descend e1; Text (" " + operatorRewrite op.Text + " "); Text "(string)"; descend e2] |> block
+    
     | CompilationUnitSyntax(aliases, usings, attrs, members, _) ->
         if (Seq.isEmpty usings && members |> Seq.forall (fun n -> n :? Syntax.NamespaceDeclarationSyntax))
         then Text "" else LineText "namespace global"  
@@ -163,12 +197,11 @@ let rec convertNode debug (model: SemanticModel) (node: SyntaxNode) =
         let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text)
         let isThis = identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(token.Text.StartsWith("this."))
         Text <| (if isThis then "this." else "") +  token.Text
-    | LiteralExpressionSyntax(token) -> Text (token.Text)
+    | LiteralExpressionSyntax(token) as n -> implicitConv n |++| Text (token.Text)
     | ExpressionStatementSyntax(_,expr,_) -> descend expr
     | ObjectCreationExpressionSyntax(_, typ, args, init) -> 
         Text ("new " + printType typ) |++| printArgumentList args
-    | ParenthesizedExpressionSyntax(left,AssignmentExpressionSyntax(e1,_,e2),right) -> 
-        [Text left.Text; descend e1; Text " <- "; descend e2; Text "; "; descend e1; Text right.Text] |> block
+    
     | ParenthesizedExpressionSyntax(left,e,right) -> Text left.Text |++| descend e |++| Text right.Text 
     | LocalDeclarationStatementSyntax(isConst,varDecl,_) as n->
         Text ("let " + mutableIfNotReadonly n) |++| descend varDecl
