@@ -1,48 +1,11 @@
-module cs2fs
+module cs2fs.Main
 
 open Microsoft.CodeAnalysis
 open Microsoft.CodeAnalysis.CSharp
+open cs2fs.AST
 
-let rec intersperse sep =
-    function
-    | [] -> []
-    | [x] -> [x]
-    | x::xs -> x::sep::(intersperse sep xs)
-
-let newline = System.Environment.NewLine
-
-type Block =
-    | Text of string
-    | Line
-    | IndentBlock of Block
-    | Block of Block list
-    
-let printBlock block =
-    let printIndent x = ([1..x] |> Seq.map (fun _ -> "    ") |> String.concat "")
-    let rec print =
-        function
-        | Text s -> s
-        | Line -> newline
-        | _ -> ""
-    let rec f indent =
-        function
-        | Text s -> [indent, Text s]
-        | Line -> [indent, Line]
-        | Block (b::bs) -> f indent b @ f indent (Block bs)
-        | Block [] -> []
-        | IndentBlock b -> f (indent + 1) b
-    f 0 block 
-    |> Seq.fold (fun (acc,lineBegin) (indent, b) -> 
-        acc + (if lineBegin then printIndent indent else "") + print b, match b with |Line -> true |_->false) ("",false)
-    |> fst  
-    
-let block xs = xs |> Seq.toList |> Block
-let (|++|) x y = Block [x;y]
-let (|+>|) x y = Block [x; IndentBlock y]
-
-let surround head tail body = head + body + tail
-
-let delim sep xs = xs |> String.concat sep
+let sequence xs = xs |> Seq.toList |> ExprSequence
+let (|++|) x y = ExprSequence [x;y]
 
 let (|VariableDeclarationSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     match node with
@@ -80,49 +43,61 @@ let rec getParentOfType<'t when 't :> SyntaxNode> (node: SyntaxNode) =
     | :? 't as p -> Some p
     | p -> getParentOfType p
 
-let rec convertNode debug (model: SemanticModel) (node: SyntaxNode) =
-    let descend n = convertNode debug model n
-    let descendOption n def = defaultArg (n |> Option.map (convertNode debug model)) def
-    let descendInd n = convertNode debug model n |> IndentBlock
-    let Text s = 
-        ((if debug then "§" else "") +
-        (sprintf "%s%s"
-            s
-            (if debug then "(" + (if isNull node then "null" else node.GetType().Name) + ")" else "")) 
-        + (if debug then "§" else ""))
-        |> Text
-    let LineText = Text >> (fun x -> x |++| Line)
-    let newline b = block [b; Line]
-    let delimText sep xs = xs |> Seq.toList |> intersperse (Text sep) |> block
+let rec missingCaseTreePrinter (n : SyntaxNode) =
+    "[!" + n.GetType().ToString() + "(" + (n.ChildNodes() |> Seq.map missingCaseTreePrinter |> String.concat "") + ")!]"
+
+let misssingCaseExpr n = ExprVal (ValId <| missingCaseTreePrinter n)
+
+let rec convertNode (model: SemanticModel) (node: SyntaxNode) =
+    let descend n = convertNode model n
+    let descendOption n def = defaultArg (n |> Option.map (convertNode model)) def
+    let descendToOption n = n |> Option.map (convertNode model)
     
-    let printType (n:Syntax.TypeSyntax) = n.ToString()
-    let printTypeAbbr (n:Syntax.TypeSyntax) =
-        let t = n.ToString()
-        if n.IsVar then "" else (" : " + t)
-    let printParamaterList (ParameterListSyntax(left, prms, right)) =
-        let prms = 
-            prms |> Seq.map (fun (ParameterSyntax(attrs, typ, ident, _)) -> 
-                ident.Text + printTypeAbbr typ) |> delim ", "
-        left.Text + prms + right.Text
-    let printArgumentList (ArgumentListSyntax(left, args, right)) =
+    let getType (n:Syntax.TypeSyntax) = TypeId <| n.ToString()
+    let getTypeAbbr n cons x =
+        let t = getType n
+        if n.IsVar then x else cons (TypType t, x)
+    let getTypePat (n:Syntax.TypeSyntax) pat = getTypeAbbr n PatWithType pat
+    let getExprWithType (n:Syntax.TypeSyntax) e = getTypeAbbr n ExprWithType e
+    
+    let printParamaterList = 
+        function
+        | null -> PatTuple [] 
+        | ParameterListSyntax(_, prms, _) ->
+            let prms = 
+                if isNull prms then [] else 
+                prms |> List.map (fun (ParameterSyntax(attrs, typ, ident, _)) -> 
+                    ident.Text |> ValId |> PatBind |> getTypePat typ)
+            prms |> PatTuple
+    
+    let printArgumentList (ArgumentListSyntax(_, args, _)) =
         let args = 
-            args |> Seq.map (fun (ArgumentSyntax(_, refOrOut, e)) -> 
-                descend e) |> delimText ", "
-        Text left.Text |++| args |++| Text right.Text
-    let defInit typ = (sprintf " = Unchecked.defaultof<%s>" <| printType typ)
+            args |> List.map (fun (ArgumentSyntax(_, refOrOut, e)) -> 
+                descend e) |> ExprTuple
+        args
+    let defInit typ = 
+        let (TypeId t) = getType typ
+        //TODO: proper generic type
+        ExprVal (ValId (sprintf "Unchecked.defaultof<%s>" t))
     
-    let getModifiers (n:SyntaxNode) =
+    let getTextModifiers (n:SyntaxNode) =
         match n with
         | :? Syntax.MethodDeclarationSyntax as n -> n.Modifiers |> Seq.toList
         | :? Syntax.FieldDeclarationSyntax as n -> n.Modifiers |> Seq.toList
         | :? Syntax.LocalDeclarationStatementSyntax as n -> n.Modifiers |> Seq.toList
         | _ -> []
         
-    let hasModifier t n = getModifiers n |> List.exists (fun (m:SyntaxToken) -> m.ValueText = t)
-    let privateText n = Text (if hasModifier "private" n then "private " else "") 
-    let staticText n = Text (if hasModifier "static" n then "static " else "")
-    let thisIfNotStatic n = (if hasModifier "static" n then "" else "this.")
-    let mutableIfNotReadonly n = (if hasModifier "readonly" n then "" else "mutable ")
+    let hasModifier t n = getTextModifiers n |> List.exists (fun (m:SyntaxToken) -> m.ValueText = t)
+    let getModifiersAll n =
+        [
+            hasModifier "private", Private
+            hasModifier "static", Static
+            hasModifier "readonly" >> not, Mutable
+        ] |> List.choose (fun (f,m) -> Option.conditional (f n) m)
+    let getModifiers n = getModifiersAll n |> List.filter ((<>) Mutable)
+    let getMutableModifier n = getModifiersAll n |> List.filter ((=) Mutable)
+
+    let thisIfNotStatic n = if hasModifier "static" n then None else Some (ValId "this")
     
     let operatorRewrite =
         function
@@ -145,111 +120,115 @@ let rec convertNode debug (model: SemanticModel) (node: SyntaxNode) =
         let t = model.GetTypeInfo(n)
         t.Type <> t.ConvertedType
     
-    let implicitConv (n: SyntaxNode) =
-        let ignoredConvs = ["IEnumerabe"] |> set
+//    let implicitConv (n: SyntaxNode) =
+//        let ignoredConvs = ["IEnumerabe"] |> set
+//        match n with
+//        | null -> Text ""
+//        | _ ->
+//            let typeName = 
+//                if haveConvertedType n then 
+//                    let t = getConvertedType n
+//                    if Set.contains t ignoredConvs then None else Some t 
+//                else None
+//            Text (defaultArg (typeName |> Option.map (fun x -> "(" + x + ")")) "")
+
+    let getVariableDeclarators n = 
         match n with
-        | null -> Text ""
-        | _ ->
-            let typeName = 
-                if haveConvertedType n then 
-                    let t = getConvertedType n
-                    if Set.contains t ignoredConvs then None else Some t 
-                else None
-            Text (defaultArg (typeName |> Option.map (fun x -> "(" + x + ")")) "")
-        
-    implicitConv node |++|
+        | VariableDeclarationSyntax(typ, vars) ->
+            vars |> Seq.map
+                (function
+                 | VariableDeclaratorSyntax(ident, args, init) -> 
+                     ValId ident.Text |> PatBind |> getTypePat typ, descendOption init (defInit typ))
+        | _ -> failwith <| missingCaseTreePrinter n
+
+    let getMembers (n: SyntaxNode) =
+        match n with
+        | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,ident,typePars,pars,typeParsConstrs,block,arrowExpr,_) as n -> 
+            [ Member (ValId ident.Text, getModifiers n, thisIfNotStatic n, printParamaterList pars, descend block) ]
+        | PropertyDeclarationSyntax(attrs, typ, explicitInterface, ident, AccessorListSyntax(_, accessors, _), arrowExpr, equals, _) ->
+            let accs = 
+                accessors |> List.map (fun (AccessorDeclarationSyntax(attrs, keyword, block, _)) ->
+                    keyword.Text, Option.ofObj block)
+            let (propPat, init) = ValId ident.Text |> PatBind |> getTypePat typ, defInit typ
+            match accs with
+            | [] -> []
+            | ["get", getBlock] -> [MemberProperty (propPat, init, descendToOption getBlock)]
+            | ["get", getBlock; "set", setBlock] -> [MemberPropertyWithSet (propPat, init, descendToOption getBlock, descendToOption setBlock)]
+            
+        | FieldDeclarationSyntax(attrs,varDecl,_) as n -> 
+            let binds = getVariableDeclarators varDecl
+            binds |> Seq.map (fun (p,e) ->
+                if hasModifier "readonly" n then
+                    MemberProperty (p, e, None)
+                else MemberPropertyWithSet (p, e, None, None)
+            ) |> Seq.toList
+        | _ -> failwith <| missingCaseTreePrinter n
+
+//    implicitConv node |++|
     match node with
-    | null -> Text ""
-    
-    | ParenthesizedExpressionSyntax(left,AssignmentExpressionSyntax(e1,_,e2),right) -> 
-        [Text left.Text; descend e1; Text " <- "; descend e2; Text "; "; descend e1; Text right.Text] |> block
-    | BinaryExpressionSyntax(e1,op,e2) when op.Text = "+" && getConvertedType e1 = "string" && getConvertedType e2 = "obj" -> 
-        [descend e1; Text (" " + operatorRewrite op.Text + " "); Text "(string)"; descend e2] |> block
+//    | null -> Text ""
+//    
+//    | ParenthesizedExpressionSyntax(left,AssignmentExpressionSyntax(e1,_,e2),right) -> 
+//        [Text left.Text; descend e1; Text " <- "; descend e2; Text "; "; descend e1; Text right.Text] |> block
+//    | BinaryExpressionSyntax(e1,op,e2) when op.Text = "+" && getConvertedType e1 = "string" && getConvertedType e2 = "obj" -> 
+//        [descend e1; Text (" " + operatorRewrite op.Text + " "); Text "(string)"; descend e2] |> block
     
     | CompilationUnitSyntax(aliases, usings, attrs, members, _) ->
-        if (Seq.isEmpty usings && members |> Seq.forall (fun n -> n :? Syntax.NamespaceDeclarationSyntax))
-        then Text "" else LineText "namespace global"  
-        |++| (usings |> Seq.map (descend) |> block)
-        |++| (members |> Seq.map descend |> block)
+        (usings |> Seq.map descend |> sequence)
+        |++| (members |> Seq.map descend |> sequence)
     | UsingDirectiveSyntax(_, staticKeyword, alias, name, _) ->
-        LineText ("open " + name.ToFullString())
+        Expr.ExprInclude (ModuleId <| name.ToFullString())
     | NamespaceDeclarationSyntax(keyword, name, _, externs, usings, members, _, _) ->
-        LineText ("namespace " + name.ToFullString())
-        |++| (usings |> Seq.map (descend >> newline) |> block)
-        |++| (members |> Seq.map (descend >> newline) |> block)
+        ExprNamespace <| (NamespaceId <| name.ToString(),
+            ((usings |> Seq.map descend |> sequence)
+            |++| (members |> Seq.map descend |> sequence)))
     | ClassDeclarationSyntax(attrs,keyword,ident,typePars,bases,constrs,_,members,_,_) as n ->
-        privateText n
-        |++| LineText ("type " + ident.Text + "() =") |+>| (members |> Seq.map descend |> block)
-    | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,ident,typePars,pars,typeParsConstrs,block,arrowExpr,_) as n -> 
-        privateText n |++| staticText n
-        |++| LineText ("member " + thisIfNotStatic n + ident.Text + (printParamaterList pars) + " =") |+>| (descend block)
+        ExprType (TypeId ident.Text,
+            TypeDeclClass (getModifiers node, printParamaterList typePars, (members |> List.collect getMembers)))
+    
     | BlockSyntax(_x,stmts,_) -> 
         match stmts with
-        | [] -> LineText "()"
-        | _ -> stmts |> Seq.map (descend >> newline) |> block
+        | [] -> ExprVal (ValId "()")
+        | _ -> stmts |> Seq.map descend |> sequence
     | ReturnStatementSyntax(_,e,_) -> descend e
-    | InvocationExpressionSyntax(e, args) -> descend e |++| printArgumentList args
-    | MemberAccessExpressionSyntax(e, op, name) -> descend e |++| Text (op.Text + name.ToFullString())
-    | BinaryExpressionSyntax(e1,op,e2) -> [descend e1; Text (" " + operatorRewrite op.Text + " "); descend e2] |> block
-    | AssignmentExpressionSyntax(e1,op,e2) -> [descend e1; Text (" <- "); descend e2] |> block
+    | InvocationExpressionSyntax(e, args) -> ExprApp (descend e, printArgumentList args)
+    | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, ExprVal (ValId <| name.ToFullString()))
+    | BinaryExpressionSyntax(e1,op,e2) -> ExprInfixApp (descend e1, ValId (operatorRewrite op.Text), descend e2)
+    | AssignmentExpressionSyntax(e1,op,e2) -> ExprInfixApp (descend e1, ValId "<-", descend e2)
     | IdentifierNameSyntax(token) as n -> 
         let identInfo = model.GetSymbolInfo n
         let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text)
         let isThis = identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(token.Text.StartsWith("this."))
-        Text <| (if isThis then "this." else "") +  token.Text
-    | LiteralExpressionSyntax(token) as n -> implicitConv n |++| Text (token.Text)
+        ExprVal <| (ValId <| (if isThis then "this." else "") +  token.Text)
+    | LiteralExpressionSyntax(token) as n -> (*implicitConv n |++|*) ExprVal <| ValId (token.Text)
     | ExpressionStatementSyntax(_,expr,_) -> descend expr
     | ObjectCreationExpressionSyntax(_, typ, args, init) -> 
-        Text ("new " + printType typ) |++| printArgumentList args
+        ExprNew (getType typ, printArgumentList args)
     
-    | ParenthesizedExpressionSyntax(left,e,right) -> Text left.Text |++| descend e |++| Text right.Text 
-    | LocalDeclarationStatementSyntax(isConst,varDecl,_) as n->
-        Text ("let " + mutableIfNotReadonly n) |++| descend varDecl
-    | VariableDeclarationSyntax(typ, vars) ->
-        vars |> Seq.map
-            (function
-             | VariableDeclaratorSyntax(ident, args, init) -> 
-                 Text (ident.Text + printTypeAbbr typ) |++| descendOption init (Text (defInit typ))
-             | x -> descend x)
-        |> block
-    | VariableDeclaratorSyntax(ident, args, init) -> Text ident.Text |++| descendOption init (Text "")
-    | EqualsValueClauseSyntax(eqToken, value) -> Text (" " + eqToken.Text + " ") |++| descend value
-    | PropertyDeclarationSyntax(attrs, typ, explicitInterface, ident, AccessorListSyntax(_, accessors, _), arrowExpr, equals, _) ->
-        let accs = 
-            accessors |> List.map (fun (AccessorDeclarationSyntax(attrs, keyword, block, _)) ->
-                keyword.Text, Option.ofObj block)
-        match accs with
-        | [] -> Text ""
-        | ["get", None] -> LineText ("member val " + ident.Text + defInit typ)
-        | ["get", None; "set", None] -> LineText ("member val " + ident.Text + defInit typ + " with get, set")
-        | ["get", Some getBlock] -> 
-            LineText ("member this." + ident.Text)
-                |+>| (LineText "with get() = " |+>| (descend getBlock))
-        | ["get", Some getBlock; "set", Some setBlock] -> 
-            LineText ("member this." + ident.Text)
-                |+>| ((LineText "with get() = " |+>| descend getBlock) 
-                      |++| (LineText "and set(value) = " |+>| descend setBlock))
-    | FieldDeclarationSyntax(attrs,varDecl,_) as n -> 
-        let accessors = " with get" + (if not (hasModifier "readonly" n) then ", set" else "") 
-        Text "member val " |++| descend varDecl |++| Text accessors |> newline
+    | ParenthesizedExpressionSyntax(_,e,_) -> descend e
+    | LocalDeclarationStatementSyntax(isConst, varDecl, _) as n->
+        let binds = getVariableDeclarators varDecl
+        binds |> Seq.map (fun (p,e) -> ExprBind(getMutableModifier n, p, e)) |> sequence
+    
+    | EqualsValueClauseSyntax(_, value) -> descend value
+    
     | UsingStatementSyntax(_, _, decl, e, _, stmt) ->
-        LineText "let __ ="
-        |+>| (Text "use " |++| descend decl |++| descend e |++| Line |++| descend stmt)
+        let binds = getVariableDeclarators decl
+        binds |> Seq.map (fun (p,e) -> ExprUseBind(p, e)) |> sequence
+        |> (fun e -> ExprBind ([], PatBind(ValId "__"), [e; descend stmt] |> sequence))
     | WhileStatementSyntax(_, _, e, _, stmt) ->
-        Text "while " |++| descend e |++| Text " do" |++| Line |+>| descend stmt
+        ExprWhile (descend e, descend stmt)
     | ForEachStatementSyntax(_, _, typ, ident, _, e, _, stmt) ->
-        Text "for " |++| Text (ident.Text + printTypeAbbr typ + " in ") |++| descend e |++| Text " do" |++| Line |+>| descend stmt
+        ExprFor (ValId ident.Text |> PatBind |> getTypePat typ, descend e, descend stmt)
     | IfStatementSyntax(_, _, e, _, stmt, elseStmt) ->
-        Text "if " |++| descend e |++| Text " then" |++| Line |+>| descend stmt
-        |> (fun x -> if isNull elseStmt then x else x |++| (LineText "else" |+>| descend elseStmt))
-    | _ -> LineText <| "[!" + node.GetType().ToString() + "!]"
-    | :? Syntax.IdentifierNameSyntax -> Text ""
+        ExprIf(descend e, descend stmt, elseStmt |> Option.ofObj |> Option.map descend)
+    | _ -> misssingCaseExpr node
 
-let convert debug (csTree: SyntaxTree) =
+let convert (csTree: SyntaxTree) =
     let mscorlib = MetadataReference.CreateFromFile(typeof<obj>.Assembly.Location)
     let compilation = CSharpCompilation.Create("MyCompilation", syntaxTrees = [| csTree |], references = [| mscorlib |])
     let model = compilation.GetSemanticModel(csTree, true)
-    csTree.GetRoot() |> convertNode debug model
+    csTree.GetRoot() |> convertNode model
 
 let input = @"
     public class MyClass
@@ -271,10 +250,12 @@ let input = @"
 [<EntryPoint>]
 let main argv =
     let tree = CSharpSyntaxTree.ParseText(System.IO.File.ReadAllText argv.[0])
-    tree |> convert true |> printBlock |> (printfn "%s")
-    tree |> convert false |> (printfn "%A")
+    let expr = tree |> convert |> Program
+    let blockExpr = expr |> cs2fs.FSharpOutput.toFs
+    let output = blockExpr |> cs2fs.FSharpOutput.printBlock
+    expr |> (printfn "%A")
+    //blockExpr |> (printfn "%A")
     printfn "==========="
-    let output = tree |> convert false |> printBlock
     if argv.Length > 1 then
         System.IO.File.WriteAllText(argv.[1], output) 
     output |> (printfn "%s")

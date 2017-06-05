@@ -43,8 +43,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Ast.fs" />
-    <Compile Include="cs2fs.fs" />
     <Compile Include="FSharpOutput.fs" />
+    <Compile Include="cs2fs.fs" />
     <None Include="App.config" />
   </ItemGroup>
   <PropertyGroup>

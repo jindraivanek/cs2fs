@@ -22,7 +22,7 @@ let printBlock block =
     let rec print =
         function
         | Text s -> s
-        | Line -> newline
+        | Line -> nl
         | _ -> ""
     let rec f indent =
         function
@@ -37,6 +37,7 @@ let printBlock block =
     |> fst  
     
 let block xs = xs |> Seq.toList |> Block
+let lineblock xs = xs |> Seq.toList |> intersperse Line |> Block
 let (|++|) x y = Block [x;y]
 let (|+>|) x y = Block [x; IndentBlock y]
 
@@ -51,12 +52,22 @@ let multi f = function
 
 let delimSurround sep head tail xs = xs |> (delim sep >> surround head tail)
 
-let LineText = Text >> (fun x -> x |++| Line)
+let LineText = Text >> (fun x -> Line |++| x)
+let indentLineBlock b = Line |+>| b
+
 let newline b = block [b; Line]
 let delimText sep xs = xs |> Seq.toList |> intersperse (Text sep) |> block
 let delimLineText sep xs = xs |> Seq.toList |> intersperse (Line |++| Text sep) |> block
 let surroundText head tail body = Text head |++| body |++| Text tail
 let delimSurroundText sep head tail xs = xs |> (delimText sep >> surroundText head tail)
+
+let getModifier =
+    function
+    | Private -> Text "private"
+    | Static -> Text "static"
+    | Mutable -> Text "mutable"
+
+let getModifiers ms = ms |> Seq.map (fun m -> getModifier m |++| Text " ") |> block
 
 let rec getTyp =
     function
@@ -79,6 +90,11 @@ let rec getPat =
     | PatWithType (t, p) -> [getPat p; getTyp t] |> delimText " : "
     | PatBindAs (ValId v, p) -> [getPat p;  Text v] |> delimText " as "
 
+let getPatNoType =
+    function
+    | PatWithType (_, p) -> getPat p
+    | p -> getPat p
+
 let rec getDecl =
     function
     | TypeDeclRecord rows -> rows |> Seq.map (fun (FieldId f, t) -> Text (f + " : ") |++| getDecl t) |> delimText "; " |> surroundText "{" "}"
@@ -86,23 +102,44 @@ let rec getDecl =
     | TypeDeclTuple ts -> ts |> Seq.map getDecl |> delimText " * " |> surroundText "(" ")"
     | TypeDeclId (TypeId p) -> Text p
     | TypeDeclWithGeneric (GenericId g, t) -> [Text g; getDecl t] |> delimText " "
+    | TypeDeclClass (modifiers, p, members) -> getModifiers modifiers |++| getPat p
+
 
 let rec getMatch (p, whenE, e) =
     let whenClause = whenE |> Option.map (fun x -> Text " when " |++| getExpr x) |> Option.fill (Text "")
     [getPat p |++| whenClause; getExpr e] |> delimText " -> "
 
-and getBind isRec isFirstRec (p, e) =
+and getMember x =
+    let property pat init getter (haveSetter, setter) =
+        let isAutoProperty = Option.isNone getter && (haveSetter = false || Option.isNone setter)
+        let header = Text (if isAutoProperty then  "member val " else "member this.") |++| getPatNoType pat |++| (if isAutoProperty then Text " = " |++| getExpr init else Text "")
+        let getterText = 
+            getter |> Option.map (fun e -> Line |+>| (Text "with get() = " |++| Line |+>| getExpr e)) 
+            |> Option.fill (Text "")
+        let setterText = 
+            setter |> Option.map (fun e -> Line |+>| (Text "and set(value) = " |++| Line |+>| getExpr e)) 
+            |> Option.fill (Text (if isAutoProperty then " with get, set" else ""))
+        header |++| getterText |++| (if haveSetter then setterText else Text "")
+    match x with
+    | Member (ValId v, modifiers, thisVal, args, expr) -> 
+        getModifiers modifiers |++| Text "member " |++| (thisVal |> Option.map (fun (ValId x) -> Text(x + ".")) |> Option.fill (Text "")) |++| Text v
+        |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
+    | MemberProperty (pat, init, getter) -> property pat init getter (false, None)
+    | MemberPropertyWithSet (pat, init, getter, setter) -> property pat init getter (true, setter)
+
+and getBind header modifiers isRec isFirstRec (p, e) =
     match isRec, isFirstRec with
-    | true, true -> Text "let rec "
+    | true, true -> Text (header + " rec ")
     | true, false -> Text "and "
-    | _ -> Text "let " 
-    |++| getPat p |++| Text " = " |++| Line |++| getExpr e
+    | _ -> Text (header + " ") 
+    |++| getModifiers modifiers |++| getPat p |++| Text " = " |++| Line |+>| getExpr e
 
 and getExpr =
     function
     | ExprConst (ConstId c) -> Text c
     | ExprVal (ValId v) -> Text v
     | ExprApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText " " |> surroundText "(" ")"
+    | ExprDotApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText "."
     | ExprInfixApp (e1, ValId v, e2) -> [getExpr e1; Text v; getExpr e2] |> delimText " " |> surroundText "(" ")"
     | ExprTuple ts -> ts |> List.map getExpr |> delimSurroundText ", " "(" ")"
     | ExprList ts -> ts |> List.map getExpr |> delimSurroundText "; " "[" "]"
@@ -110,31 +147,44 @@ and getExpr =
         let fields = rows |> Seq.map (fun (FieldId f, e) -> Text f |++| Text " = " |++| getExpr e) |> delimText "; " 
         let copyStat = copyE |> Option.map (fun x -> getExpr x |++| Text " with ") |> Option.fill (Text "")
         copyStat |++| fields |> surroundText "{" "}"
-    | ExprBind (p,e) -> 
-        getBind false false (p,e)
+    | ExprBind (modifiers, p, e) -> 
+        getBind "let" modifiers false false (p,e)
+    | ExprUseBind (p, e) -> 
+        getBind "use" [] false false (p,e)
     | ExprRecBind bindings -> 
         let n = Seq.length bindings
-        (bindings |> Seq.mapi (fun i x -> getBind true (i=0) x |> newline) |> block) 
+        (bindings |> Seq.mapi (fun i x -> getBind "let" [] true (i=0) x |> newline) |> block) 
     | ExprMatch (e, rows) -> 
         ([Text "match"; getExpr e; Text "with"] |> delimText " ")
         |++| Line |++| (rows |> Seq.map (fun m -> getMatch m) |> delimLineText "| ")
     | ExprMatchLambda (rows) -> 
         Text "function"
         |++| Line |++| (rows |> Seq.map (fun m -> getMatch m) |> delimLineText "| ")
-    | ExprLambda (args, e) -> Text "fun " |++| (args |> Seq.map getPat |> delimText " ") |++| Text " -> " |++| getExpr e |> surroundText "(" ")"
+    | ExprLambda (args, e) -> 
+        Text "fun " |++| (args |> Seq.map getPat |> delimText " ") |++| Text " -> " |++| getExpr e |> surroundText "(" ")"
     | ExprWithType (t, e) -> getExpr e |++| Text " : " |++| getTyp t
-    | ExprModule (ModuleId m, e) -> Text "module " |++| Text m |++| Text " = struct " |++| Line |++| getExpr e |++| Text " end"
+    | ExprModule (ModuleId m, e) -> Text "module " |++| Text m |++| Text " =" |++| Line |+>| getExpr e
+    | ExprNamespace (NamespaceId m, e) -> Text "namespace " |++| Text m |++| Line |++| getExpr e
+    | ExprType (TypeId tId, TypeDeclClass (modifiers, args, members)) -> 
+        Text "type " |++| Text tId |++| getModifiers modifiers |++| getPat args |++| Text " =" |++| Line 
+        |+>| (members |> Seq.map getMember |> lineblock)
     | ExprType (TypeId tId, t) -> Text "type " |++| Text tId |++| Text " = " |++| getDecl t
-    | ExprNewType (TypeId tId, t) -> Text "datatype " |++| Text tId |++| Text " = " |++| getDecl t
-    | ExprInclude (ModuleId m) -> Text "load " |++| Text m
+    | ExprNew (TypeId tId, e) -> Text "new " |++| Text tId |++| getExpr e
+    | ExprInclude (ModuleId m) -> Text "open " |++| Text m
+    | ExprIf (cond, thenExpr, elseExprMaybe) ->
+        Text "if " |++| getExpr cond |++| LineText "then" |++| indentLineBlock (getExpr thenExpr)
+        |++| (elseExprMaybe |> Option.map (fun e -> LineText "else" |++| indentLineBlock (getExpr e)) |> Option.fill (Text ""))
+    | ExprFor (pat, collection, expr) ->
+        Text "for " |++| getPat pat |++| Text " in " |++| getExpr collection |++| Text " do" |++| indentLineBlock (getExpr expr)
+    | ExprWhile (cond, expr) ->
+        Text "while " |++| getExpr cond |++| Text " do" |++| indentLineBlock (getExpr expr)
     | ExprSequence es -> 
-        let n = Seq.length es
-        es |> Seq.mapi (fun i e -> 
-            getExpr e |++| 
-            (if i < n-1 then 
-                match e with 
-                |ExprBind _ 
-                |ExprRecBind _ -> Text " in " 
-                |_ -> Text "" 
-            else Text ""))
-        |> delimLineText ""
+        es |> Seq.map getExpr |> delimLineText ""
+
+
+
+
+let toFs (Program e) =
+    e |> cs2fs.AST.simplify 
+    |> cs2fs.AST.Transforms.globalNamespace
+    |> getExpr
