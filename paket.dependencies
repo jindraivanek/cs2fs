@@ -1,4 +1,5 @@
 source https://www.nuget.org/api/v2
+nuget ExtCore
 nuget FAKE
 nuget FSharp.Core
 nuget Microsoft.CodeAnalysis.CSharp
