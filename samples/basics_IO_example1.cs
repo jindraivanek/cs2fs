@@ -18,14 +18,12 @@ namespace Example1
             }
 
             Console.WriteLine(Environment.NewLine);
-            Console.ReadLine();
             
             Console.WriteLine("Read all line in the file:" + Environment.NewLine);
             string file = File.ReadAllText(@"basics_IO_example1.cs");
             Console.WriteLine(file);
 
             Console.WriteLine(Environment.NewLine);
-            Console.ReadLine();
 
             Console.WriteLine("Read all line in the file:" + Environment.NewLine);
 
@@ -40,8 +38,6 @@ namespace Example1
 
                 Console.WriteLine(line);
             }
-
-            Console.ReadLine();
         }
     }
 }
