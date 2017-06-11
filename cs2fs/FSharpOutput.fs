@@ -61,6 +61,7 @@ let delimLineText sep xs = xs |> Seq.toList |> intersperse (Line |++| Text sep) 
 let surroundText head tail body = Text head |++| body |++| Text tail
 let delimSurroundText sep head tail xs = xs |> (delimText sep >> surroundText head tail)
 
+
 let getModifier =
     function
     | Private -> Text "private"
@@ -177,14 +178,21 @@ and getExpr =
     | ExprFor (pat, collection, expr) ->
         Text "for " |++| getPat pat |++| Text " in " |++| getExpr collection |++| Text " do" |++| indentLineBlock (getExpr expr)
     | ExprWhile (cond, expr) ->
-        Text "while " |++| getExpr cond |++| Text " do" |++| indentLineBlock (getExpr expr)
+        Text "while " |++| getExprIndentWithParIfSeq cond |++| Text " do" |++| indentLineBlock (getExpr expr)
     | ExprSequence es -> 
         es |> Seq.map getExpr |> delimLineText ""
+    
+    | ExprTypeConversion (TypeId t, e) -> Text (t + " ") |++| getExpr e |> surroundText "(" ")"
 
-
-
+and getExprIndentIfSeq e =
+    match e with
+    | ExprSequence (_::_::_) -> getExpr e |> indentLineBlock
+    | _ -> getExpr e
+and getExprIndentWithParIfSeq e = getExprIndentIfSeq e |> surroundText "(" ")"
 
 let toFs (Program e) =
     e |> cs2fs.AST.simplify 
     |> cs2fs.AST.Transforms.globalNamespace
+    |> cs2fs.AST.Transforms.assignmentAsExpr
+    |> cs2fs.AST.Transforms.binaryOpWithString
     |> getExpr

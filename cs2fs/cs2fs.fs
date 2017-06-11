@@ -164,13 +164,6 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
 
     let exprF node =
         match node with
-    //    | null -> Text ""
-    //    
-    //    | ParenthesizedExpressionSyntax(left,AssignmentExpressionSyntax(e1,_,e2),right) -> 
-    //        [Text left.Text; descend e1; Text " <- "; descend e2; Text "; "; descend e1; Text right.Text] |> block
-    //    | BinaryExpressionSyntax(e1,op,e2) when op.Text = "+" && getConvertedType e1 = "string" && getConvertedType e2 = "obj" -> 
-    //        [descend e1; Text (" " + operatorRewrite op.Text + " "); Text "(string)"; descend e2] |> block
-        
         | CompilationUnitSyntax(aliases, usings, attrs, members, _) ->
             (usings |> Seq.map descend |> sequence)
             |++| (members |> Seq.map descend |> sequence)
@@ -198,7 +191,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text)
             let isThis = identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(token.Text.StartsWith("this."))
             ExprVal <| (ValId <| (if isThis then "this." else "") +  token.Text)
-        | LiteralExpressionSyntax(token) as n -> ExprVal <| ValId (token.Text)
+        | LiteralExpressionSyntax(token) as n -> ExprConst <| ConstId (token.Text)
         | ExpressionStatementSyntax(_,expr,_) -> descend expr
         | ObjectCreationExpressionSyntax(_, typ, args, init) -> 
             ExprNew (getType typ, printArgumentList args)

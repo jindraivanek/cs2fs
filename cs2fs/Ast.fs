@@ -102,12 +102,9 @@ let rec simplify =
         |> ExprSequence
     | e -> e
 
-module rec Transforms =
-    let transformF descendF astF n =
-        let rec inner n =
-            descendF astF (fun g -> inner (g n))
-        inner n
+let constIsString (ConstId c) = String.startsWith "\"" c && String.endsWith "\"" c
 
+module rec Transforms =
     let recFuncs astF = 
         let eF n = n |> astF.ExprF |> transformExpr astF
         let tF n = n |> astF.TypF |> transformTyp astF        
@@ -185,6 +182,10 @@ module rec Transforms =
         | MemberProperty (p, e, eo) -> MemberProperty (pF p, eF e, Option.map eF eo)
         | MemberPropertyWithSet (p, e, eo, eo2) -> MemberPropertyWithSet (pF p, eF e, Option.map eF eo, Option.map eF eo2)
 
+    let exprMap f =
+        { ASTmapF.Default with
+            ExprF = f
+        } |> transformExpr
     let globalNamespace program =
         match program with
         | ExprSequence (e::es) ->
@@ -195,10 +196,15 @@ module rec Transforms =
         | p -> p
 
     let assignmentAsExpr =
-        { ASTmapF.Default with
-            ExprF =
-            function
-            | ExprInfixApp(ExprInfixApp(e1, ValId "<-", e2) as assignment, op, e3) -> 
-                ExprSequence [assignment; ExprInfixApp(e1, op, e3)]
-            | e -> e
-        } |> transformExpr
+        function
+        | ExprInfixApp(ExprInfixApp(e1, ValId "<-", e2) as assignment, op, e3) -> 
+            ExprSequence [assignment; ExprInfixApp(e1, op, e3)]
+        | e -> e
+        |> exprMap
+
+    let binaryOpWithString =
+        function
+        | ExprInfixApp(ExprConst c, op, ExprTypeConversion(TypeId "obj", e)) when constIsString c -> 
+            ExprInfixApp(ExprConst c, op, ExprTypeConversion(TypeId "string", e))
+        | e -> e
+        |> exprMap
