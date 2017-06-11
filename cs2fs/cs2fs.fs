@@ -48,10 +48,11 @@ let rec missingCaseTreePrinter (n : SyntaxNode) =
 
 let misssingCaseExpr n = ExprVal (ValId <| missingCaseTreePrinter n)
 
-let rec convertNode (model: SemanticModel) (node: SyntaxNode) =
-    let descend n = convertNode model n
-    let descendOption n def = defaultArg (n |> Option.map (convertNode model)) def
-    let descendToOption n = n |> Option.map (convertNode model)
+let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
+    let descend n = convertNode true model n
+    let descendOption n def = defaultArg (n |> Option.map (convertNode true model)) def
+    let descendToOption n = n |> Option.map (convertNode true model)
+    let descendNoImplicit n = convertNode false model n
     
     let getType (n:Syntax.TypeSyntax) = TypeId <| n.ToString()
     let getTypeAbbr n cons x =
@@ -120,17 +121,14 @@ let rec convertNode (model: SemanticModel) (node: SyntaxNode) =
         let t = model.GetTypeInfo(n)
         t.Type <> t.ConvertedType
     
-//    let implicitConv (n: SyntaxNode) =
-//        let ignoredConvs = ["IEnumerabe"] |> set
-//        match n with
-//        | null -> Text ""
-//        | _ ->
-//            let typeName = 
-//                if haveConvertedType n then 
-//                    let t = getConvertedType n
-//                    if Set.contains t ignoredConvs then None else Some t 
-//                else None
-//            Text (defaultArg (typeName |> Option.map (fun x -> "(" + x + ")")) "")
+    let implicitConv (n: SyntaxNode) =
+        let ignoredConvs = ["IEnumerable"] |> set
+        let typeName = 
+           if haveConvertedType n then 
+               let t = getConvertedType n
+               if Set.contains t ignoredConvs then None else Some t 
+           else None
+        typeName |> Option.map TypeId
 
     let getVariableDeclarators n = 
         match n with
@@ -164,71 +162,76 @@ let rec convertNode (model: SemanticModel) (node: SyntaxNode) =
             ) |> Seq.toList
         | _ -> failwith <| missingCaseTreePrinter n
 
-//    implicitConv node |++|
-    match node with
-//    | null -> Text ""
-//    
-//    | ParenthesizedExpressionSyntax(left,AssignmentExpressionSyntax(e1,_,e2),right) -> 
-//        [Text left.Text; descend e1; Text " <- "; descend e2; Text "; "; descend e1; Text right.Text] |> block
-//    | BinaryExpressionSyntax(e1,op,e2) when op.Text = "+" && getConvertedType e1 = "string" && getConvertedType e2 = "obj" -> 
-//        [descend e1; Text (" " + operatorRewrite op.Text + " "); Text "(string)"; descend e2] |> block
-    
-    | CompilationUnitSyntax(aliases, usings, attrs, members, _) ->
-        (usings |> Seq.map descend |> sequence)
-        |++| (members |> Seq.map descend |> sequence)
-    | UsingDirectiveSyntax(_, staticKeyword, alias, name, _) ->
-        Expr.ExprInclude (ModuleId <| name.ToFullString())
-    | NamespaceDeclarationSyntax(keyword, name, _, externs, usings, members, _, _) ->
-        ExprNamespace <| (NamespaceId <| name.ToString(),
-            ((usings |> Seq.map descend |> sequence)
-            |++| (members |> Seq.map descend |> sequence)))
-    | ClassDeclarationSyntax(attrs,keyword,ident,typePars,bases,constrs,_,members,_,_) as n ->
-        ExprType (TypeId ident.Text,
-            TypeDeclClass (getModifiers node, printParamaterList typePars, (members |> List.collect getMembers)))
-    
-    | BlockSyntax(_x,stmts,_) -> 
-        match stmts with
-        | [] -> ExprVal (ValId "()")
-        | _ -> stmts |> Seq.map descend |> sequence
-    | ReturnStatementSyntax(_,e,_) -> descend e
-    | InvocationExpressionSyntax(e, args) -> ExprApp (descend e, printArgumentList args)
-    | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, ExprVal (ValId <| name.ToFullString()))
-    | BinaryExpressionSyntax(e1,op,e2) -> ExprInfixApp (descend e1, ValId (operatorRewrite op.Text), descend e2)
-    | AssignmentExpressionSyntax(e1,op,e2) -> ExprInfixApp (descend e1, ValId "<-", descend e2)
-    | IdentifierNameSyntax(token) as n -> 
-        let identInfo = model.GetSymbolInfo n
-        let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text)
-        let isThis = identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(token.Text.StartsWith("this."))
-        ExprVal <| (ValId <| (if isThis then "this." else "") +  token.Text)
-    | LiteralExpressionSyntax(token) as n -> (*implicitConv n |++|*) ExprVal <| ValId (token.Text)
-    | ExpressionStatementSyntax(_,expr,_) -> descend expr
-    | ObjectCreationExpressionSyntax(_, typ, args, init) -> 
-        ExprNew (getType typ, printArgumentList args)
-    
-    | ParenthesizedExpressionSyntax(_,e,_) -> descend e
-    | LocalDeclarationStatementSyntax(isConst, varDecl, _) as n->
-        let binds = getVariableDeclarators varDecl
-        binds |> Seq.map (fun (p,e) -> ExprBind(getMutableModifier n, p, e)) |> sequence
-    
-    | EqualsValueClauseSyntax(_, value) -> descend value
-    
-    | UsingStatementSyntax(_, _, decl, e, _, stmt) ->
-        let binds = getVariableDeclarators decl
-        binds |> Seq.map (fun (p,e) -> ExprUseBind(p, e)) |> sequence
-        |> (fun e -> ExprBind ([], PatBind(ValId "__"), [e; descend stmt] |> sequence))
-    | WhileStatementSyntax(_, _, e, _, stmt) ->
-        ExprWhile (descend e, descend stmt)
-    | ForEachStatementSyntax(_, _, typ, ident, _, e, _, stmt) ->
-        ExprFor (ValId ident.Text |> PatBind |> getTypePat typ, descend e, descend stmt)
-    | IfStatementSyntax(_, _, e, _, stmt, elseStmt) ->
-        ExprIf(descend e, descend stmt, elseStmt |> Option.ofObj |> Option.map descend)
-    | _ -> misssingCaseExpr node
+    let exprF node =
+        match node with
+    //    | null -> Text ""
+    //    
+    //    | ParenthesizedExpressionSyntax(left,AssignmentExpressionSyntax(e1,_,e2),right) -> 
+    //        [Text left.Text; descend e1; Text " <- "; descend e2; Text "; "; descend e1; Text right.Text] |> block
+    //    | BinaryExpressionSyntax(e1,op,e2) when op.Text = "+" && getConvertedType e1 = "string" && getConvertedType e2 = "obj" -> 
+    //        [descend e1; Text (" " + operatorRewrite op.Text + " "); Text "(string)"; descend e2] |> block
+        
+        | CompilationUnitSyntax(aliases, usings, attrs, members, _) ->
+            (usings |> Seq.map descend |> sequence)
+            |++| (members |> Seq.map descend |> sequence)
+        | UsingDirectiveSyntax(_, staticKeyword, alias, name, _) ->
+            Expr.ExprInclude (ModuleId <| name.ToFullString())
+        | NamespaceDeclarationSyntax(keyword, name, _, externs, usings, members, _, _) ->
+            ExprNamespace <| (NamespaceId <| name.ToString(),
+                ((usings |> Seq.map descend |> sequence)
+                |++| (members |> Seq.map descend |> sequence)))
+        | ClassDeclarationSyntax(attrs,keyword,ident,typePars,bases,constrs,_,members,_,_) as n ->
+            ExprType (TypeId ident.Text,
+                TypeDeclClass (getModifiers node, printParamaterList typePars, (members |> List.collect getMembers)))
+        
+        | BlockSyntax(_x,stmts,_) -> 
+            match stmts with
+            | [] -> ExprVal (ValId "()")
+            | _ -> stmts |> Seq.map descend |> sequence
+        | ReturnStatementSyntax(_,e,_) -> descend e
+        | InvocationExpressionSyntax(e, args) -> ExprApp (descend e, printArgumentList args)
+        | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, ExprVal (ValId <| name.ToFullString()))
+        | BinaryExpressionSyntax(e1,op,e2) -> ExprInfixApp (descend e1, ValId (operatorRewrite op.Text), descend e2)
+        | AssignmentExpressionSyntax(e1,op,e2) -> ExprInfixApp (descend e1, ValId "<-", descend e2)
+        | IdentifierNameSyntax(token) as n -> 
+            let identInfo = model.GetSymbolInfo (n:SyntaxNode)
+            let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text)
+            let isThis = identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(token.Text.StartsWith("this."))
+            ExprVal <| (ValId <| (if isThis then "this." else "") +  token.Text)
+        | LiteralExpressionSyntax(token) as n -> ExprVal <| ValId (token.Text)
+        | ExpressionStatementSyntax(_,expr,_) -> descend expr
+        | ObjectCreationExpressionSyntax(_, typ, args, init) -> 
+            ExprNew (getType typ, printArgumentList args)
+        
+        | ParenthesizedExpressionSyntax(_,e,_) -> descend e
+        | LocalDeclarationStatementSyntax(isConst, varDecl, _) as n->
+            let binds = getVariableDeclarators varDecl
+            binds |> Seq.map (fun (p,e) -> ExprBind(getMutableModifier n, p, e)) |> sequence
+        
+        | EqualsValueClauseSyntax(_, value) -> descend value
+        
+        | UsingStatementSyntax(_, _, decl, e, _, stmt) ->
+            let binds = getVariableDeclarators decl
+            binds |> Seq.map (fun (p,e) -> ExprUseBind(p, e)) |> sequence
+            |> (fun e -> ExprBind ([], PatBind(ValId "__"), [e; descend stmt] |> sequence))
+        | WhileStatementSyntax(_, _, e, _, stmt) ->
+            ExprWhile (descend e, descend stmt)
+        | ForEachStatementSyntax(_, _, typ, ident, _, e, _, stmt) ->
+            ExprFor (ValId ident.Text |> PatBind |> getTypePat typ, descend e, descend stmt)
+        | IfStatementSyntax(_, _, e, _, stmt, elseStmt) ->
+            ExprIf(descend e, descend stmt, elseStmt |> Option.ofObj |> Option.map descend)
+        | _ -> misssingCaseExpr node
+
+    if tryImplicitConv then
+        implicitConv node |> Option.map (fun t -> ExprTypeConversion (t, descendNoImplicit node)) 
+        |> Option.fill (exprF node)
+    else exprF node
 
 let convert (csTree: SyntaxTree) =
     let mscorlib = MetadataReference.CreateFromFile(typeof<obj>.Assembly.Location)
     let compilation = CSharpCompilation.Create("MyCompilation", syntaxTrees = [| csTree |], references = [| mscorlib |])
     let model = compilation.GetSemanticModel(csTree, true)
-    csTree.GetRoot() |> convertNode model
+    csTree.GetRoot() |> convertNode true model
 
 let input = @"
     public class MyClass
