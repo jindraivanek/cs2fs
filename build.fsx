@@ -34,9 +34,9 @@ Target "Deploy" (fun _ ->
 )
 
 // Build order
-"Clean"
-  ==> "Build"
-  ==> "Deploy"
+//"Clean" ==>
+"Build" ==>
+"Deploy"
 
 // start build
 RunTargetOrDefault "Build"
