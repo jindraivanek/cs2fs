@@ -7,6 +7,7 @@ type GenericId = GenericId of string
 type ConstId = ConstId of string
 type ValId = ValId of string
 type FieldId = FieldId of string
+type AttributeId = AttributeId of string
 
 type Modifier =
 | Private
@@ -72,6 +73,7 @@ and Expr =
 | ExprIf of Expr * Expr * Expr option
 | ExprFor of Pat * Expr * Expr
 | ExprWhile of Expr * Expr
+| ExprAttribute of AttributeId list * Expr
 
 | ExprTypeConversion of TypeId * Expr
 
@@ -80,18 +82,20 @@ and Match = Pat * Expr option * Expr
 type Program = Program of Expr
 
 type ASTmapF = {
-    ExprF : Expr -> Expr
-    TypF : Typ -> Typ
-    PatF : Pat -> Pat
-    TypeDeclF : TypeDecl -> TypeDecl
-    MemberF : Member -> Member
+    ExprF : Expr -> Expr option
+    TypF : Typ -> Typ option
+    PatF : Pat -> Pat option
+    TypeDeclF : TypeDecl -> TypeDecl option
+    MemberF : Member -> Member option
+    RecurseIntoChanged: bool
 } with
     static member Default = {
-        ExprF = id
-        TypF = id
-        PatF = id
-        TypeDeclF = id
-        MemberF = id
+        ExprF = fun _ -> None
+        TypF = fun _ -> None
+        PatF = fun _ -> None
+        TypeDeclF = fun _ -> None
+        MemberF = fun _ -> None
+        RecurseIntoChanged = true
     }
 
 let rec simplify =
@@ -104,13 +108,16 @@ let rec simplify =
 
 let constIsString (ConstId c) = String.startsWith "\"" c && String.endsWith "\"" c
 
+let applyAstF recurse f recF n = f n |> Option.map (if recurse then recF else id) |> Option.fillWith (fun () -> recF n) 
+
 module rec Transforms =
     let recFuncs astF = 
-        let eF n = n |> astF.ExprF |> transformExpr astF
-        let tF n = n |> astF.TypF |> transformTyp astF        
-        let pF n = n |> astF.PatF |> transformPat astF
-        let dF n = n |> astF.TypeDeclF |> transformTypeDecl astF
-        let mF n = n |> astF.MemberF |> transformMember astF
+        let apply f recF n = applyAstF astF.RecurseIntoChanged f recF n
+        let eF n = n |> apply astF.ExprF (transformExpr astF)
+        let tF n = n |> apply astF.TypF (transformTyp astF)
+        let pF n = n |> apply astF.PatF (transformPat astF)
+        let dF n = n |> apply astF.TypeDeclF (transformTypeDecl astF)
+        let mF n = n |> apply astF.MemberF (transformMember astF)
         eF, tF, pF, dF, mF
     let transformExpr astF e =
         let (eF, tF, pF, dF, mF) = recFuncs astF
@@ -139,6 +146,7 @@ module rec Transforms =
         | ExprIf (e1,e2,eo) -> ExprIf(eF e1, eF e2, Option.map eF eo)
         | ExprFor (p,e1,e2) -> ExprFor(pF p, eF e1, eF e2)
         | ExprWhile (e1,e2) -> ExprWhile(eF e1, eF e2)
+        | ExprAttribute (a,e) -> ExprAttribute (a, eF e)
 
         | ExprTypeConversion(t,e) -> ExprTypeConversion(t, eF e)
 
@@ -186,25 +194,48 @@ module rec Transforms =
         { ASTmapF.Default with
             ExprF = f
         } |> transformExpr
-    let globalNamespace program =
-        match program with
-        | ExprSequence (e::es) ->
+
+    let exprMapOnce f =
+        { ASTmapF.Default with
+            ExprF = f
+            RecurseIntoChanged = false
+        } |> transformExpr
+    let globalNamespace =
+        function
+        | ExprSequence (e::es) as program ->
             match e with
             | ExprNamespace _
-            | ExprModule _ -> ExprSequence (e::es)
+            | ExprModule _ -> program
             | _ -> ExprNamespace (NamespaceId "global", program)
-        | p -> p
+        | e -> e
 
     let assignmentAsExpr =
         function
         | ExprInfixApp(ExprInfixApp(e1, ValId "<-", e2) as assignment, op, e3) -> 
-            ExprSequence [assignment; ExprInfixApp(e1, op, e3)]
-        | e -> e
+            Some <| ExprSequence [assignment; ExprInfixApp(e1, op, e3)]
+        | _ -> None
         |> exprMap
 
     let binaryOpWithString =
         function
         | ExprInfixApp(ExprConst c, op, ExprTypeConversion(TypeId "obj", e)) when constIsString c -> 
-            ExprInfixApp(ExprConst c, op, ExprTypeConversion(TypeId "string", e))
-        | e -> e
+            Some <| ExprInfixApp(ExprConst c, op, ExprTypeConversion(TypeId "string", e))
+        | _ -> None
         |> exprMap
+
+    let entryPoint =
+        let isMainMember =
+            function
+            | Member (ValId "Main", [Static], None, PatTuple [PatWithType(TypType (TypeId "string[]"), PatBind (ValId _))], _) -> true
+            | _ -> false
+        function
+        | (ExprType (TypeId mainClass, TypeDeclClass (_, _, members))) as e ->
+            printfn "EntryPoint"
+            members |> List.tryFind isMainMember |> Option.map (fun _ -> 
+                printfn "EntryPoint"
+                let mainCall = ExprApp (ExprDotApp (ExprVal (ValId mainClass), ExprVal (ValId "Main")), ExprTuple [ExprVal (ValId "args")])
+                let mainBind = ExprAttribute([AttributeId "EntryPoint"], ExprBind ([], PatCons (ValId "main", [PatBind (ValId "args")]), ExprSequence [mainCall; ExprConst (ConstId "0")]))
+                Some <| ExprSequence [e; ExprModule (ModuleId (mainClass + "__run"), mainBind)]
+            ) |> Option.fill None
+        | _ -> None
+        |> exprMapOnce

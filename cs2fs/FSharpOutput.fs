@@ -181,7 +181,10 @@ and getExpr =
         Text "while " |++| getExprIndentWithParIfSeq cond |++| Text " do" |++| indentLineBlock (getExpr expr)
     | ExprSequence es -> 
         es |> Seq.map getExpr |> delimLineText ""
-    
+    | ExprAttribute (attrs, e) ->
+        attrs |> List.map (fun (AttributeId x) -> Text x) |> delimSurroundText "; " "[<" ">]" |++| Line
+        |++| getExpr e
+      
     | ExprTypeConversion (TypeId t, e) -> Text (t + " ") |++| getExpr e |> surroundText "(" ")"
 
 and getExprIndentIfSeq e =
@@ -195,4 +198,5 @@ let toFs (Program e) =
     |> cs2fs.AST.Transforms.globalNamespace
     |> cs2fs.AST.Transforms.assignmentAsExpr
     |> cs2fs.AST.Transforms.binaryOpWithString
+    |> cs2fs.AST.Transforms.entryPoint
     |> getExpr
