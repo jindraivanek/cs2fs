@@ -130,6 +130,12 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
            else None
         typeName |> Option.map TypeId
 
+    let getAttributes attrs =
+        attrs |> Seq.collect (fun (a: Syntax.AttributeListSyntax) -> a.Attributes |> Seq.map (fun x -> AttributeId <| x.Name.ToFullString())) |> Seq.toList
+        |> Option.conditional (List.isEmpty attrs |> not)
+    let applyAttributes attrs e =
+        getAttributes attrs |> Option.map (fun a -> ExprAttribute (a, e)) |> Option.fill e
+
     let getVariableDeclarators n = 
         match n with
         | VariableDeclarationSyntax(typ, vars) ->
@@ -142,7 +148,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
     let getMembers (n: SyntaxNode) =
         match n with
         | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,ident,typePars,pars,typeParsConstrs,block,arrowExpr,_) as n -> 
-            [ Member (ValId ident.Text, getModifiers n, thisIfNotStatic n, printParamaterList pars, descend block) ]
+            [ ExprMember (ValId ident.Text, getModifiers n, thisIfNotStatic n, printParamaterList pars, descend block) |> applyAttributes attrs ]
+            
         | PropertyDeclarationSyntax(attrs, typ, explicitInterface, ident, AccessorListSyntax(_, accessors, _), arrowExpr, equals, _) ->
             let accs = 
                 accessors |> List.map (fun (AccessorDeclarationSyntax(attrs, keyword, block, _)) ->
@@ -150,15 +157,16 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let (propPat, init) = ValId ident.Text |> PatBind |> getTypePat typ, defInit typ
             match accs with
             | [] -> []
-            | ["get", getBlock] -> [MemberProperty (propPat, init, descendToOption getBlock)]
-            | ["get", getBlock; "set", setBlock] -> [MemberPropertyWithSet (propPat, init, descendToOption getBlock, descendToOption setBlock)]
+            | ["get", getBlock] -> [ExprMemberProperty (propPat, init, descendToOption getBlock) |> applyAttributes attrs]
+            | ["get", getBlock; "set", setBlock] -> [ExprMemberPropertyWithSet (propPat, init, descendToOption getBlock, descendToOption setBlock) |> applyAttributes attrs]
             
         | FieldDeclarationSyntax(attrs,varDecl,_) as n -> 
             let binds = getVariableDeclarators varDecl
             binds |> Seq.map (fun (p,e) ->
                 if hasModifier "readonly" n then
-                    MemberProperty (p, e, None)
-                else MemberPropertyWithSet (p, e, None, None)
+                    ExprMemberProperty (p, e, None)
+                else ExprMemberPropertyWithSet (p, e, None, None)
+                 |> applyAttributes attrs
             ) |> Seq.toList
         | _ -> failwith <| missingCaseTreePrinter n
 
@@ -167,6 +175,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | CompilationUnitSyntax(aliases, usings, attrs, members, _) ->
             (usings |> Seq.map descend |> sequence)
             |++| (members |> Seq.map descend |> sequence)
+            |> applyAttributes attrs
         | UsingDirectiveSyntax(_, staticKeyword, alias, name, _) ->
             Expr.ExprInclude (ModuleId <| name.ToFullString())
         | NamespaceDeclarationSyntax(keyword, name, _, externs, usings, members, _, _) ->
@@ -176,6 +185,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | ClassDeclarationSyntax(attrs,keyword,ident,typePars,bases,constrs,_,members,_,_) as n ->
             ExprType (TypeId ident.Text,
                 TypeDeclClass (getModifiers node, printParamaterList typePars, (members |> List.collect getMembers)))
+            |> applyAttributes attrs
         
         | BlockSyntax(_x,stmts,_) -> 
             match stmts with

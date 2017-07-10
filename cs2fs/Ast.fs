@@ -39,14 +39,9 @@ type TypeDecl =
 | TypeDeclRecord of (FieldId * TypeDecl) list
 | TypeDeclUnion of (ValId * TypeDecl option) list
 | TypeDeclTuple of TypeDecl list
-| TypeDeclClass of Modifier list * Pat * Member list
+| TypeDeclClass of Modifier list * Pat * Expr list
 | TypeDeclId of TypeId
 | TypeDeclWithGeneric of GenericId * TypeDecl
-
-and Member = 
-| Member of ValId * Modifier list * ValId option * Pat * Expr
-| MemberProperty of Pat * Expr * Expr option
-| MemberPropertyWithSet of Pat * Expr * Expr option * Expr option
 
 and Expr =
 | ExprConst of ConstId
@@ -73,6 +68,11 @@ and Expr =
 | ExprIf of Expr * Expr * Expr option
 | ExprFor of Pat * Expr * Expr
 | ExprWhile of Expr * Expr
+
+| ExprMember of ValId * Modifier list * ValId option * Pat * Expr
+| ExprMemberProperty of Pat * Expr * Expr option
+| ExprMemberPropertyWithSet of Pat * Expr * Expr option * Expr option
+
 | ExprAttribute of AttributeId list * Expr
 
 | ExprTypeConversion of TypeId * Expr
@@ -86,7 +86,6 @@ type ASTmapF = {
     TypF : Typ -> Typ option
     PatF : Pat -> Pat option
     TypeDeclF : TypeDecl -> TypeDecl option
-    MemberF : Member -> Member option
     RecurseIntoChanged: bool
 } with
     static member Default = {
@@ -94,7 +93,6 @@ type ASTmapF = {
         TypF = fun _ -> None
         PatF = fun _ -> None
         TypeDeclF = fun _ -> None
-        MemberF = fun _ -> None
         RecurseIntoChanged = true
     }
 
@@ -117,10 +115,9 @@ module rec Transforms =
         let tF n = n |> apply astF.TypF (transformTyp astF)
         let pF n = n |> apply astF.PatF (transformPat astF)
         let dF n = n |> apply astF.TypeDeclF (transformTypeDecl astF)
-        let mF n = n |> apply astF.MemberF (transformMember astF)
-        eF, tF, pF, dF, mF
+        eF, tF, pF, dF
     let transformExpr astF e =
-        let (eF, tF, pF, dF, mF) = recFuncs astF
+        let (eF, tF, pF, dF) = recFuncs astF
         match e with
         | ExprApp(e1, e2) -> ExprApp(eF e1, eF e2)
         | ExprInfixApp(e1, op, e2) -> ExprInfixApp(eF e1, op, eF e2)
@@ -147,11 +144,14 @@ module rec Transforms =
         | ExprFor (p,e1,e2) -> ExprFor(pF p, eF e1, eF e2)
         | ExprWhile (e1,e2) -> ExprWhile(eF e1, eF e2)
         | ExprAttribute (a,e) -> ExprAttribute (a, eF e)
+        | ExprMember (v, ms, vo, p, e) -> ExprMember(v, ms, vo, pF p, eF e)
+        | ExprMemberProperty (p, e, eo) -> ExprMemberProperty (pF p, eF e, Option.map eF eo)
+        | ExprMemberPropertyWithSet (p, e, eo, eo2) -> ExprMemberPropertyWithSet (pF p, eF e, Option.map eF eo, Option.map eF eo2)
 
         | ExprTypeConversion(t,e) -> ExprTypeConversion(t, eF e)
 
     let transformPat astF n = 
-        let (eF, tF, pF, dF, mF) = recFuncs astF
+        let (eF, tF, pF, dF) = recFuncs astF
         match n with
         | PatConst c -> PatConst c
         | PatWildcard -> PatWildcard
@@ -165,7 +165,7 @@ module rec Transforms =
         | PatBindAs (v, p) -> PatBindAs (v, pF p)
                 
     let transformTyp astF n = 
-        let (eF, tF, pF, dF, mF) = recFuncs astF
+        let (eF, tF, pF, dF) = recFuncs astF
         match n with
         | TypType t -> TypType t
         | TypGeneric g -> TypGeneric g
@@ -174,22 +174,15 @@ module rec Transforms =
         | TypTuple xs -> xs |> List.map tF |> TypTuple
     
     let transformTypeDecl astF n = 
-        let (eF, tF, pF, dF, mF) = recFuncs astF
+        let (eF, tF, pF, dF) = recFuncs astF
         match n with
         | TypeDeclRecord xs -> xs |> List.map (fun (fId, t) -> fId, dF t) |> TypeDeclRecord
         | TypeDeclUnion xs -> xs |> List.map (fun (fId, t) -> fId, Option.map dF t) |> TypeDeclUnion
         | TypeDeclTuple xs -> xs |> List.map dF |> TypeDeclTuple
-        | TypeDeclClass (mods, p, membs) -> (mods, pF p, (membs |> List.map mF)) |> TypeDeclClass 
+        | TypeDeclClass (mods, p, membs) -> (mods, pF p, (membs |> List.map eF)) |> TypeDeclClass 
         | TypeDeclId t -> TypeDeclId t
         | TypeDeclWithGeneric (g,t) -> TypeDeclWithGeneric (g, dF t)
         
-    let transformMember astF n = 
-        let (eF, tF, pF, dF, mF) = recFuncs astF
-        match n with
-        | Member (v, ms, vo, p, e) -> Member(v, ms, vo, pF p, eF e)
-        | MemberProperty (p, e, eo) -> MemberProperty (pF p, eF e, Option.map eF eo)
-        | MemberPropertyWithSet (p, e, eo, eo2) -> MemberPropertyWithSet (pF p, eF e, Option.map eF eo, Option.map eF eo2)
-
     let exprMap f =
         { ASTmapF.Default with
             ExprF = f
@@ -226,7 +219,7 @@ module rec Transforms =
     let entryPoint =
         let isMainMember =
             function
-            | Member (ValId "Main", [Static], None, PatTuple [PatWithType(TypType (TypeId "string[]"), PatBind (ValId _))], _) -> true
+            | ExprMember (ValId "Main", [Static], None, PatTuple [PatWithType(TypType (TypeId "string[]"), PatBind (ValId _))], _) -> true
             | _ -> false
         function
         | (ExprType (TypeId mainClass, TypeDeclClass (_, _, members))) as e ->

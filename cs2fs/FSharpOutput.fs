@@ -122,11 +122,14 @@ and getMember x =
             |> Option.fill (Text (if isAutoProperty then " with get, set" else ""))
         header |++| getterText |++| (if haveSetter then setterText else Text "")
     match x with
-    | Member (ValId v, modifiers, thisVal, args, expr) -> 
+    | ExprMember (ValId v, modifiers, thisVal, args, expr) -> 
         getModifiers modifiers |++| Text "member " |++| (thisVal |> Option.map (fun (ValId x) -> Text(x + ".")) |> Option.fill (Text "")) |++| Text v
         |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
-    | MemberProperty (pat, init, getter) -> property pat init getter (false, None)
-    | MemberPropertyWithSet (pat, init, getter, setter) -> property pat init getter (true, setter)
+    | ExprMemberProperty (pat, init, getter) -> property pat init getter (false, None)
+    | ExprMemberPropertyWithSet (pat, init, getter, setter) -> property pat init getter (true, setter)
+    | ExprAttribute (attrs, e) -> 
+        attrs |> List.map (fun (AttributeId x) -> Text x) |> delimSurroundText "; " "[<" ">]" |++| Line
+        |++| getMember e
 
 and getBind header modifiers isRec isFirstRec (p, e) =
     match isRec, isFirstRec with
