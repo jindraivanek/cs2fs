@@ -41,7 +41,7 @@ type TypeDecl =
 | TypeDeclTuple of TypeDecl list
 | TypeDeclClass of Modifier list * Pat * Expr list
 | TypeDeclId of TypeId
-| TypeDeclWithGeneric of GenericId * TypeDecl
+| TypeDeclWithGeneric of GenericId list * TypeDecl
 
 and Expr =
 | ExprConst of ConstId
@@ -69,7 +69,7 @@ and Expr =
 | ExprFor of Pat * Expr * Expr
 | ExprWhile of Expr * Expr
 
-| ExprMember of ValId * Modifier list * ValId option * Pat * Expr
+| ExprMember of ValId * GenericId list * Modifier list * ValId option * Pat * Expr
 | ExprMemberProperty of Pat * Expr * Expr option
 | ExprMemberPropertyWithSet of Pat * Expr * Expr option * Expr option
 
@@ -144,7 +144,7 @@ module rec Transforms =
         | ExprFor (p,e1,e2) -> ExprFor(pF p, eF e1, eF e2)
         | ExprWhile (e1,e2) -> ExprWhile(eF e1, eF e2)
         | ExprAttribute (a,e) -> ExprAttribute (a, eF e)
-        | ExprMember (v, ms, vo, p, e) -> ExprMember(v, ms, vo, pF p, eF e)
+        | ExprMember (v, gs, ms, vo, p, e) -> ExprMember(v, gs, ms, vo, pF p, eF e)
         | ExprMemberProperty (p, e, eo) -> ExprMemberProperty (pF p, eF e, Option.map eF eo)
         | ExprMemberPropertyWithSet (p, e, eo, eo2) -> ExprMemberPropertyWithSet (pF p, eF e, Option.map eF eo, Option.map eF eo2)
 
@@ -219,7 +219,7 @@ module rec Transforms =
     let entryPoint =
         let isMainMember =
             function
-            | ExprMember (ValId "Main", [Static], None, PatTuple [PatWithType(TypType (TypeId "string[]"), PatBind (ValId _))], _) -> true
+            | ExprMember (ValId "Main", [], [Static], None, PatTuple [PatWithType(TypType (TypeId "string[]"), PatBind (ValId _))], _) -> true
             | _ -> false
         function
         | (ExprType (TypeId mainClass, TypeDeclClass (_, _, members))) as e ->

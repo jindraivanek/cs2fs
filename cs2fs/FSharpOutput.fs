@@ -70,6 +70,8 @@ let getModifier =
 
 let getModifiers ms = ms |> Seq.map (fun m -> getModifier m |++| Text " ") |> block
 
+let getGenerics gs = gs |> Seq.map (fun (GenericId g) -> Text g) |> delimSurroundText ", " "<" ">"
+
 let rec getTyp =
     function
     | TypType (TypeId x) -> Text x
@@ -102,7 +104,7 @@ let rec getDecl =
     | TypeDeclUnion rows -> rows |> Seq.map (fun (ValId v, t) -> Text v |++| (t |> Option.map (fun x -> Text " of " |++| getDecl x) |> Option.fill (Text ""))) |> delimText " | "
     | TypeDeclTuple ts -> ts |> Seq.map getDecl |> delimText " * " |> surroundText "(" ")"
     | TypeDeclId (TypeId p) -> Text p
-    | TypeDeclWithGeneric (GenericId g, t) -> [Text g; getDecl t] |> delimText " "
+    | TypeDeclWithGeneric (gs, t) -> getDecl t |++| getGenerics gs
     | TypeDeclClass (modifiers, p, members) -> getModifiers modifiers |++| getPat p
 
 
@@ -122,9 +124,9 @@ and getMember x =
             |> Option.fill (Text (if isAutoProperty then " with get, set" else ""))
         header |++| getterText |++| (if haveSetter then setterText else Text "")
     match x with
-    | ExprMember (ValId v, modifiers, thisVal, args, expr) -> 
+    | ExprMember (ValId v, generics, modifiers, thisVal, args, expr) -> 
         getModifiers modifiers |++| Text "member " |++| (thisVal |> Option.map (fun (ValId x) -> Text(x + ".")) |> Option.fill (Text "")) |++| Text v
-        |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
+        |++| getGenerics generics |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
     | ExprMemberProperty (pat, init, getter) -> property pat init getter (false, None)
     | ExprMemberPropertyWithSet (pat, init, getter, setter) -> property pat init getter (true, setter)
     | ExprAttribute (attrs, e) -> 

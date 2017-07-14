@@ -24,7 +24,13 @@ let (|ParameterListSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     | :? Microsoft.CodeAnalysis.CSharp.Syntax.ParameterListSyntax as node ->
       Some (node.OpenParenToken, node.Parameters |> Seq.toList, node.CloseParenToken)
     | _ -> None
-    
+
+let (|TypeParameterListSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
+    match node with
+    | :? Microsoft.CodeAnalysis.CSharp.Syntax.TypeParameterListSyntax as node ->
+      Some (node.LessThanToken, node.Parameters |> Seq.toList, node.GreaterThanToken)
+    | _ -> None
+
 let (|ArgumentListSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     match node with
     | :? Microsoft.CodeAnalysis.CSharp.Syntax.ArgumentListSyntax as node ->
@@ -144,11 +150,21 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                  | VariableDeclaratorSyntax(ident, args, init) -> 
                      ValId ident.Text |> PatBind |> getTypePat typ, descendOption init (defInit typ))
         | _ -> failwith <| missingCaseTreePrinter n
+    
+    let getGenerics p =
+        match p with
+        | TypeParameterListSyntax(_, l, _) ->
+            l |> List.map (fun t -> GenericId t.Identifier.Text)
+        | null 
+        | _ -> []
 
     let getMembers (n: SyntaxNode) =
         match n with
         | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,ident,typePars,pars,typeParsConstrs,block,arrowExpr,_) as n -> 
-            [ ExprMember (ValId ident.Text, getModifiers n, thisIfNotStatic n, printParamaterList pars, descend block) |> applyAttributes attrs ]
+            [ 
+                ExprMember (ValId ident.Text, getGenerics typePars, getModifiers n, thisIfNotStatic n, printParamaterList pars, descend block) 
+                    |> applyAttributes attrs 
+            ]
             
         | PropertyDeclarationSyntax(attrs, typ, explicitInterface, ident, AccessorListSyntax(_, accessors, _), arrowExpr, equals, _) ->
             let accs = 
