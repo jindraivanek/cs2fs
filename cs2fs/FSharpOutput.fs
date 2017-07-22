@@ -68,17 +68,17 @@ let getModifier =
     | Static -> Text "static"
     | Mutable -> Text "mutable"
     
-let getModifierRank =
+let getModifierGroup =
     function
     | Private -> 2
     | Static
     | Mutable -> 1
 
-let getModifiersOfRank rank ms = 
-    ms |> Seq.filter (fun x -> getModifierRank x = rank) 
+let getModifiersOfGroup rank ms = 
+    ms |> Seq.filter (fun x -> getModifierGroup x = rank) 
     |> Seq.map (fun m -> getModifier m |++| Text " ") |> block
 
-let getModifiers ms = [1..2] |> Seq.map (fun r -> getModifiersOfRank r ms) |> block 
+let getModifiers ms = [1..2] |> Seq.map (fun r -> getModifiersOfGroup r ms) |> block 
 
 let getGenerics gs = gs |> Seq.map (fun (GenericId g) -> Text ("'" + g)) |> delimSurroundText ", " "<" ">"
 
