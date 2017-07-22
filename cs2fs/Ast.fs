@@ -39,9 +39,8 @@ type TypeDecl =
 | TypeDeclRecord of (FieldId * TypeDecl) list
 | TypeDeclUnion of (ValId * TypeDecl option) list
 | TypeDeclTuple of TypeDecl list
-| TypeDeclClass of Modifier list * Pat * Expr list
+| TypeDeclClass of Modifier list * GenericId list * Pat * Expr list
 | TypeDeclId of TypeId
-| TypeDeclWithGeneric of GenericId list * TypeDecl
 
 and Expr =
 | ExprConst of ConstId
@@ -67,7 +66,7 @@ and Expr =
 | ExprInclude of ModuleId
 | ExprIf of Expr * Expr * Expr option
 | ExprFor of Pat * Expr * Expr
-| ExprWhile of Expr * Expr
+| ExprWhile of cond: Expr * body: Expr
 
 | ExprMember of ValId * GenericId list * Modifier list * ValId option * Pat * Expr
 | ExprMemberProperty of Pat * Expr * Expr option
@@ -179,9 +178,8 @@ module rec Transforms =
         | TypeDeclRecord xs -> xs |> List.map (fun (fId, t) -> fId, dF t) |> TypeDeclRecord
         | TypeDeclUnion xs -> xs |> List.map (fun (fId, t) -> fId, Option.map dF t) |> TypeDeclUnion
         | TypeDeclTuple xs -> xs |> List.map dF |> TypeDeclTuple
-        | TypeDeclClass (mods, p, membs) -> (mods, pF p, (membs |> List.map eF)) |> TypeDeclClass 
+        | TypeDeclClass (mods, generics, p, membs) -> (mods, generics, pF p, (membs |> List.map eF)) |> TypeDeclClass 
         | TypeDeclId t -> TypeDeclId t
-        | TypeDeclWithGeneric (g,t) -> TypeDeclWithGeneric (g, dF t)
         
     let exprMap f =
         { ASTmapF.Default with
@@ -222,7 +220,7 @@ module rec Transforms =
             | ExprMember (ValId "Main", [], [Static], None, PatTuple [PatWithType(TypType (TypeId "string[]"), PatBind (ValId _))], _) -> true
             | _ -> false
         function
-        | (ExprType (TypeId mainClass, TypeDeclClass (_, _, members))) as e ->
+        | (ExprType (TypeId mainClass, TypeDeclClass (_, _, _, members))) as e ->
             printfn "EntryPoint"
             members |> List.tryFind isMainMember |> Option.map (fun _ -> 
                 printfn "EntryPoint"

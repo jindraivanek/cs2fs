@@ -61,20 +61,23 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
     let descendNoImplicit n = convertNode false model n
     
     let getType (n:Syntax.TypeSyntax) = TypeId <| n.ToString()
-    let getTypeAbbr n cons x =
-        let t = getType n
-        if n.IsVar then x else cons (TypType t, x)
-    let getTypePat (n:Syntax.TypeSyntax) pat = getTypeAbbr n PatWithType pat
-    let getExprWithType (n:Syntax.TypeSyntax) e = getTypeAbbr n ExprWithType e
+    let getTypeAbbr genericSet (n:Syntax.TypeSyntax) cons x =
+        let t = n.ToString()
+        if n.IsVar then x else 
+            if (Set.contains t genericSet) then cons (TypGeneric (GenericId t), x)
+            else cons (TypType (TypeId t), x)
+    let getTypePat genericSet (n:Syntax.TypeSyntax) pat = getTypeAbbr genericSet n PatWithType pat
+    let getExprWithType genericSet (n:Syntax.TypeSyntax) e = getTypeAbbr genericSet n ExprWithType e
     
-    let printParamaterList = 
+    let printParamaterList generics = 
+        let genericSet = generics |> Seq.map (fun (GenericId g) -> g) |> set
         function
         | null -> PatTuple [] 
         | ParameterListSyntax(_, prms, _) ->
             let prms = 
                 if isNull prms then [] else 
                 prms |> List.map (fun (ParameterSyntax(attrs, typ, ident, _)) -> 
-                    ident.Text |> ValId |> PatBind |> getTypePat typ)
+                    ident.Text |> ValId |> PatBind |> getTypePat genericSet typ)
             prms |> PatTuple
     
     let printArgumentList (ArgumentListSyntax(_, args, _)) =
@@ -148,7 +151,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             vars |> Seq.map
                 (function
                  | VariableDeclaratorSyntax(ident, args, init) -> 
-                     ValId ident.Text |> PatBind |> getTypePat typ, descendOption init (defInit typ))
+                     ValId ident.Text |> PatBind |> getTypePat (set[]) typ, descendOption init (defInit typ))
         | _ -> failwith <| missingCaseTreePrinter n
     
     let getGenerics p =
@@ -158,11 +161,12 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | null 
         | _ -> []
 
-    let getMembers (n: SyntaxNode) =
+    let getMembers classGenerics (n: SyntaxNode) =
         match n with
         | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,ident,typePars,pars,typeParsConstrs,block,arrowExpr,_) as n -> 
+            let gs = getGenerics typePars
             [ 
-                ExprMember (ValId ident.Text, getGenerics typePars, getModifiers n, thisIfNotStatic n, printParamaterList pars, descend block) 
+                ExprMember (ValId ident.Text, gs, getModifiers n, thisIfNotStatic n, printParamaterList (classGenerics @ gs) pars, descend block) 
                     |> applyAttributes attrs 
             ]
             
@@ -170,7 +174,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let accs = 
                 accessors |> List.map (fun (AccessorDeclarationSyntax(attrs, keyword, block, _)) ->
                     keyword.Text, Option.ofObj block)
-            let (propPat, init) = ValId ident.Text |> PatBind |> getTypePat typ, defInit typ
+            let (propPat, init) = ValId ident.Text |> PatBind |> getTypePat (set[]) typ, defInit typ
             match accs with
             | [] -> []
             | ["get", getBlock] -> [ExprMemberProperty (propPat, init, descendToOption getBlock) |> applyAttributes attrs]
@@ -199,8 +203,9 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 ((usings |> Seq.map descend |> sequence)
                 |++| (members |> Seq.map descend |> sequence)))
         | ClassDeclarationSyntax(attrs,keyword,ident,typePars,bases,constrs,_,members,_,_) as n ->
+            let gs = getGenerics typePars
             ExprType (TypeId ident.Text,
-                TypeDeclClass (getModifiers node, printParamaterList typePars, (members |> List.collect getMembers)))
+                TypeDeclClass (getModifiers node, gs, PatTuple[], (members |> List.collect (getMembers gs))))
             |> applyAttributes attrs
         
         | BlockSyntax(_x,stmts,_) -> 
@@ -236,7 +241,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | WhileStatementSyntax(_, _, e, _, stmt) ->
             ExprWhile (descend e, descend stmt)
         | ForEachStatementSyntax(_, _, typ, ident, _, e, _, stmt) ->
-            ExprFor (ValId ident.Text |> PatBind |> getTypePat typ, descend e, descend stmt)
+            ExprFor (ValId ident.Text |> PatBind |> getTypePat (set[]) typ, descend e, descend stmt)
         | IfStatementSyntax(_, _, e, _, stmt, elseStmt) ->
             ExprIf(descend e, descend stmt, elseStmt |> Option.ofObj |> Option.map descend)
         | _ -> misssingCaseExpr node

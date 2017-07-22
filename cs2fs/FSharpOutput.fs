@@ -85,7 +85,7 @@ let getGenerics gs = gs |> Seq.map (fun (GenericId g) -> Text ("'" + g)) |> deli
 let rec getTyp =
     function
     | TypType (TypeId x) -> Text x
-    | TypGeneric (GenericId x) -> Text x
+    | TypGeneric (GenericId x) -> Text ("'" + x)
     | TypWithGeneric(GenericId g, x) -> getTyp x |++| Text ("<" + g + ">") 
     | TypFun(t1, t2) -> [t1; t2] |> Seq.map getTyp |> delimText " -> "
     | TypTuple(ts) -> ts |> Seq.map getTyp |> delimText " * " |> surroundText "(" ")"
@@ -114,8 +114,7 @@ let rec getDecl =
     | TypeDeclUnion rows -> rows |> Seq.map (fun (ValId v, t) -> Text v |++| (t |> Option.map (fun x -> Text " of " |++| getDecl x) |> Option.fill (Text ""))) |> delimText " | "
     | TypeDeclTuple ts -> ts |> Seq.map getDecl |> delimText " * " |> surroundText "(" ")"
     | TypeDeclId (TypeId p) -> Text p
-    | TypeDeclWithGeneric (gs, t) -> getDecl t |++| getGenerics gs
-    | TypeDeclClass (modifiers, p, members) -> getModifiers modifiers |++| getPat p
+    | TypeDeclClass (modifiers, generics, p, members) -> getModifiers modifiers |++| getPat p
 
 
 let rec getMatch (p, whenE, e) =
@@ -182,8 +181,8 @@ and getExpr =
     | ExprWithType (t, e) -> getExpr e |++| Text " : " |++| getTyp t
     | ExprModule (ModuleId m, e) -> Text "module " |++| Text m |++| Text " =" |++| Line |+>| getExpr e
     | ExprNamespace (NamespaceId m, e) -> Text "namespace " |++| Text m |++| Line |++| getExpr e
-    | ExprType (TypeId tId, TypeDeclClass (modifiers, args, members)) -> 
-        Text "type " |++| Text tId |++| getModifiers modifiers |++| getPat args |++| Text " =" |++| Line 
+    | ExprType (TypeId tId, TypeDeclClass (modifiers, generics, args, members)) -> 
+        Text "type " |++| Text tId |++| getModifiers modifiers |++| getGenerics generics |++| getPat args |++| Text " =" |++| Line 
         |+>| (members |> Seq.map getMember |> lineblock)
     | ExprType (TypeId tId, t) -> Text "type " |++| Text tId |++| Text " = " |++| getDecl t
     | ExprNew (TypeId tId, e) -> Text "new " |++| Text tId |++| getExpr e
@@ -201,7 +200,7 @@ and getExpr =
         attrs |> List.map (fun (AttributeId x) -> Text x) |> delimSurroundText "; " "[<" ">]" |++| Line
         |++| getExpr e
       
-    | ExprTypeConversion (TypeId t, e) -> Text (t + " ") |++| getExpr e |> surroundText "(" ")"
+    | ExprTypeConversion (TypeId t, e) -> getExpr e |++| Text (" :> " + t) |> surroundText "(" ")"
 
 and getExprIndentIfSeq e =
     match e with
