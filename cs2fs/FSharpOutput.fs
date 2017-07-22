@@ -135,7 +135,7 @@ and getMember x =
         header |++| getterText |++| (if haveSetter then setterText else Text "")
     match x with
     | ExprMember (ValId v, generics, modifiers, thisVal, args, expr) -> 
-        getModifiersOfRank 1 modifiers |++| Text "member " |++| getModifiersOfRank 2 modifiers 
+        getModifiersOfGroup 1 modifiers |++| Text "member " |++| getModifiersOfGroup 2 modifiers 
         |++| (thisVal |> Option.map (fun (ValId x) -> Text(x + ".")) |> Option.fill (Text "")) |++| Text v
         |++| getGenerics generics |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
     | ExprMemberProperty (pat, init, getter) -> property pat init getter (false, None)
