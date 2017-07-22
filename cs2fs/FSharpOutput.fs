@@ -67,10 +67,20 @@ let getModifier =
     | Private -> Text "private"
     | Static -> Text "static"
     | Mutable -> Text "mutable"
+    
+let getModifierRank =
+    function
+    | Private -> 2
+    | Static
+    | Mutable -> 1
 
-let getModifiers ms = ms |> Seq.map (fun m -> getModifier m |++| Text " ") |> block
+let getModifiersOfRank rank ms = 
+    ms |> Seq.filter (fun x -> getModifierRank x = rank) 
+    |> Seq.map (fun m -> getModifier m |++| Text " ") |> block
 
-let getGenerics gs = gs |> Seq.map (fun (GenericId g) -> Text g) |> delimSurroundText ", " "<" ">"
+let getModifiers ms = [1..2] |> Seq.map (fun r -> getModifiersOfRank r ms) |> block 
+
+let getGenerics gs = gs |> Seq.map (fun (GenericId g) -> Text ("'" + g)) |> delimSurroundText ", " "<" ">"
 
 let rec getTyp =
     function
@@ -125,7 +135,8 @@ and getMember x =
         header |++| getterText |++| (if haveSetter then setterText else Text "")
     match x with
     | ExprMember (ValId v, generics, modifiers, thisVal, args, expr) -> 
-        getModifiers modifiers |++| Text "member " |++| (thisVal |> Option.map (fun (ValId x) -> Text(x + ".")) |> Option.fill (Text "")) |++| Text v
+        getModifiersOfRank 1 modifiers |++| Text "member " |++| getModifiersOfRank 2 modifiers 
+        |++| (thisVal |> Option.map (fun (ValId x) -> Text(x + ".")) |> Option.fill (Text "")) |++| Text v
         |++| getGenerics generics |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
     | ExprMemberProperty (pat, init, getter) -> property pat init getter (false, None)
     | ExprMemberPropertyWithSet (pat, init, getter, setter) -> property pat init getter (true, setter)
