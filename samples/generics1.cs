@@ -1,6 +1,6 @@
-public class MyClass
+public class MyClass<T>
 {
-    private bool MyMethod<T>(T x, T y)
+    private bool MyMethod<U>(T x, U y)
     {
         return x == y;
     }
