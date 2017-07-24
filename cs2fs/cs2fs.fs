@@ -42,6 +42,13 @@ let (|FieldDeclarationSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     | :? Microsoft.CodeAnalysis.CSharp.Syntax.FieldDeclarationSyntax as node ->
       Some (node.AttributeLists |> Seq.toList, node.Declaration, node.Modifiers |> Seq.toList)
     | _ -> None
+
+let (|InitializerExpressionSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
+    match node with
+    | :? Microsoft.CodeAnalysis.CSharp.Syntax.InitializerExpressionSyntax as node ->
+      Some (node.Expressions |> Seq.toList)
+    | _ -> None
+
     
 let rec getParentOfType<'t when 't :> SyntaxNode> (node: SyntaxNode) =
     match node.Parent with
@@ -62,22 +69,27 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
     
     let getType (n:Syntax.TypeSyntax) = TypeId <| n.ToString()
     let getTypeAbbr genericSet (n:Syntax.TypeSyntax) cons x =
-        let t = n.ToString()
-        if n.IsVar then x else 
-            if (Set.contains t genericSet) then cons (TypGeneric (GenericId t), x)
-            else cons (TypType (TypeId t), x)
+        match n with
+        | null -> x
+        | _ -> 
+            let t = n.ToString()
+            if n.IsVar then x else 
+                if (Set.contains t genericSet) then cons (TypGeneric (GenericId t), x)
+                else cons (TypType (TypeId t), x)
     let getTypePat genericSet (n:Syntax.TypeSyntax) pat = getTypeAbbr genericSet n PatWithType pat
     let getExprWithType genericSet (n:Syntax.TypeSyntax) e = getTypeAbbr genericSet n ExprWithType e
     
+    let getParameterSyntax generics (ParameterSyntax(attrs, typ, ident, _)) = 
+        let genericSet = generics |> Seq.choose (function | TypGeneric (GenericId g) -> Some g | _ -> None) |> set
+        ident.Text |> ValId |> PatBind |> getTypePat genericSet typ
+    
     let printParamaterList generics = 
-        let genericSet = generics |> Seq.map (fun (GenericId g) -> g) |> set
         function
         | null -> PatTuple [] 
         | ParameterListSyntax(_, prms, _) ->
             let prms = 
                 if isNull prms then [] else 
-                prms |> List.map (fun (ParameterSyntax(attrs, typ, ident, _)) -> 
-                    ident.Text |> ValId |> PatBind |> getTypePat genericSet typ)
+                prms |> List.map (getParameterSyntax generics) 
             prms |> PatTuple
     
     let printArgumentList (ArgumentListSyntax(_, args, _)) =
@@ -124,20 +136,27 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             | SpecialType.System_String -> "string"
             | SpecialType.None -> typ.Name
             | _ -> typ.Name
-        typeName
+            
+        let genPars =
+            match typ with
+            | :? INamedTypeSymbol as x -> x.TypeArguments |> Seq.map (fun t -> TypType (TypeId t.Name)) |> Seq.toList |> Some
+            | _ -> None
+        typeName, genPars
     
     let haveConvertedType (n: SyntaxNode) = 
         let t = model.GetTypeInfo(n)
         t.Type <> t.ConvertedType
     
     let implicitConv (n: SyntaxNode) =
-        let ignoredConvs = ["IEnumerable"] |> set
-        let typeName = 
+        let ignoredConvs = ["IEnumerable"; ""] |> set
+        let typ = 
            if haveConvertedType n then 
-               let t = getConvertedType n
-               if Set.contains t ignoredConvs then None else Some t 
+               let (t,gs) = getConvertedType n
+               if Set.contains t ignoredConvs then None else 
+                   let tt = TypeId t |> TypType
+                   Some (gs |> Option.map (fun g -> TypWithGeneric(g,tt)) |> Option.fill tt) 
            else None
-        typeName |> Option.map TypeId
+        typ
 
     let getAttributes attrs =
         attrs |> Seq.collect (fun (a: Syntax.AttributeListSyntax) -> a.Attributes |> Seq.map (fun x -> AttributeId <| x.Name.ToFullString())) |> Seq.toList
@@ -157,7 +176,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
     let getGenerics p =
         match p with
         | TypeParameterListSyntax(_, l, _) ->
-            l |> List.map (fun t -> GenericId t.Identifier.Text)
+            l |> List.map (fun t -> GenericId t.Identifier.Text |> TypGeneric)
         | null 
         | _ -> []
 
@@ -213,6 +232,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             | [] -> ExprVal (ValId "()")
             | _ -> stmts |> Seq.map descend |> sequence
         | ReturnStatementSyntax(_,e,_) -> descend e
+        | SimpleLambdaExpressionSyntax(_, par, _, e) -> ExprLambda([getParameterSyntax [] par], descend e)
+        | ParenthesizedLambdaExpressionSyntax(_, pars, _, e) -> ExprLambda([printParamaterList [] pars], descend e)
         | InvocationExpressionSyntax(e, args) -> ExprApp (descend e, printArgumentList args)
         | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, ExprVal (ValId <| name.ToFullString()))
         | BinaryExpressionSyntax(e1,op,e2) -> ExprInfixApp (descend e1, ValId (operatorRewrite op.Text), descend e2)
@@ -244,6 +265,12 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ExprFor (ValId ident.Text |> PatBind |> getTypePat (set[]) typ, descend e, descend stmt)
         | IfStatementSyntax(_, _, e, _, stmt, elseStmt) ->
             ExprIf(descend e, descend stmt, elseStmt |> Option.ofObj |> Option.map descend)
+        | ElseClauseSyntax(_,e) -> descend e
+        | ConditionalExpressionSyntax(e1, _, e2, _, e3) ->
+            ExprIf(descend e1, descend e2, Some (descend e3))
+            
+        | InitializerExpressionSyntax(es) -> ExprList(es |> List.map descend)
+            
         | _ -> misssingCaseExpr node
 
     if tryImplicitConv then

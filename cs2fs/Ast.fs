@@ -18,7 +18,7 @@ type Modifier =
 type Typ =
 | TypType of TypeId
 | TypGeneric of GenericId
-| TypWithGeneric of GenericId * Typ
+| TypWithGeneric of Typ list * Typ
 | TypFun of Typ * Typ
 | TypTuple of Typ list
 
@@ -39,7 +39,7 @@ type TypeDecl =
 | TypeDeclRecord of (FieldId * TypeDecl) list
 | TypeDeclUnion of (ValId * TypeDecl option) list
 | TypeDeclTuple of TypeDecl list
-| TypeDeclClass of Modifier list * GenericId list * Pat * Expr list
+| TypeDeclClass of Modifier list * Typ list * Pat * Expr list
 | TypeDeclId of TypeId
 
 and Expr =
@@ -68,13 +68,13 @@ and Expr =
 | ExprFor of Pat * Expr * Expr
 | ExprWhile of cond: Expr * body: Expr
 
-| ExprMember of ValId * GenericId list * Modifier list * ValId option * Pat * Expr
+| ExprMember of ValId * Typ list * Modifier list * ValId option * Pat * Expr
 | ExprMemberProperty of Pat * Expr * Expr option
 | ExprMemberPropertyWithSet of Pat * Expr * Expr option * Expr option
 
 | ExprAttribute of AttributeId list * Expr
 
-| ExprTypeConversion of TypeId * Expr
+| ExprTypeConversion of Typ * Expr
 
 and Match = Pat * Expr option * Expr
 
@@ -209,8 +209,8 @@ module rec Transforms =
 
     let binaryOpWithString =
         function
-        | ExprInfixApp(ExprConst c, op, ExprTypeConversion(TypeId "obj", e)) when constIsString c -> 
-            Some <| ExprInfixApp(ExprConst c, op, ExprTypeConversion(TypeId "string", e))
+        | ExprInfixApp(ExprConst c, op, ExprTypeConversion(TypType (TypeId "obj"), e)) when constIsString c -> 
+            Some <| ExprInfixApp(ExprConst c, op, ExprTypeConversion(TypType (TypeId "string"), e))
         | _ -> None
         |> exprMap
 

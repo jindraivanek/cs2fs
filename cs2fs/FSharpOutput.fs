@@ -80,15 +80,19 @@ let getModifiersOfGroup rank ms =
 
 let getModifiers ms = [1..2] |> Seq.map (fun r -> getModifiersOfGroup r ms) |> block 
 
-let getGenerics gs = gs |> Seq.map (fun (GenericId g) -> Text ("'" + g)) |> delimSurroundText ", " "<" ">"
 
 let rec getTyp =
     function
     | TypType (TypeId x) -> Text x
     | TypGeneric (GenericId x) -> Text ("'" + x)
-    | TypWithGeneric(GenericId g, x) -> getTyp x |++| Text ("<" + g + ">") 
+    | TypWithGeneric(gs, x) -> getTyp x |++| getGenerics gs 
     | TypFun(t1, t2) -> [t1; t2] |> Seq.map getTyp |> delimText " -> "
     | TypTuple(ts) -> ts |> Seq.map getTyp |> delimText " * " |> surroundText "(" ")"
+
+and getGenerics gs = 
+    if Seq.isEmpty gs then Text ""
+    else gs |> Seq.map getTyp |> delimSurroundText ", " "<" ">"
+
 
 let rec getPat =
     function
@@ -200,7 +204,7 @@ and getExpr =
         attrs |> List.map (fun (AttributeId x) -> Text x) |> delimSurroundText "; " "[<" ">]" |++| Line
         |++| getExpr e
       
-    | ExprTypeConversion (TypeId t, e) -> getExpr e |++| Text (" :> " + t) |> surroundText "(" ")"
+    | ExprTypeConversion (t, e) -> getExpr e |++| Text " :> " |++| (getTyp t) |> surroundText "(" ")"
 
 and getExprIndentIfSeq e =
     match e with
