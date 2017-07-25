@@ -61,21 +61,42 @@ let rec missingCaseTreePrinter (n : SyntaxNode) =
 
 let misssingCaseExpr n = ExprVal (ValId <| missingCaseTreePrinter n)
 
+let fullName (n: ISymbol) =
+    let rec f (n: ISymbol) = 
+        if n.ContainingNamespace <> null && n.ContainingNamespace.Name <> "" then 
+            (f n.ContainingNamespace) + n.ContainingNamespace.Name + "." 
+        else ""
+    f n + n.Name
+
 let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
     let descend n = convertNode true model n
     let descendOption n def = defaultArg (n |> Option.map (convertNode true model)) def
     let descendToOption n = n |> Option.map (convertNode true model)
     let descendNoImplicit n = convertNode false model n
     
-    let getType (n:Syntax.TypeSyntax) = TypeId <| n.ToString()
+    let getTypeInfoFromType (t: ITypeSymbol) =
+        match t with
+        | :? INamedTypeSymbol as x -> 
+            let gs = x.TypeArguments |> Seq.map (fun t -> TypType (TypeId (fullName t))) |> Seq.toList
+            fullName t, (gs |> Option.condition (List.isEmpty >> not))
+        | :? IArrayTypeSymbol as x -> x.ToDisplayString(), None
+        | _ -> fullName t, None
+    let getTypeInfo (n: SyntaxNode) = getTypeInfoFromType (model.GetTypeInfo(n).Type) 
+        
+    let getType (n:Syntax.TypeSyntax) =  
+        match n with
+        | :? Syntax.IdentifierNameSyntax as x -> x.Identifier.Text |> TypeId |> TypType
+        | _ ->
+            let (t, gs) = getTypeInfo n
+            gs |> Option.map (fun g -> TypWithGeneric(g, TypType (TypeId t))) |> Option.fill (TypType (TypeId t))
     let getTypeAbbr genericSet (n:Syntax.TypeSyntax) cons x =
         match n with
         | null -> x
         | _ -> 
-            let t = n.ToString()
+            let (t, gs) = getTypeInfo n
             if n.IsVar then x else 
                 if (Set.contains t genericSet) then cons (TypGeneric (GenericId t), x)
-                else cons (TypType (TypeId t), x)
+                else cons (getType n, x)
     let getTypePat genericSet (n:Syntax.TypeSyntax) pat = getTypeAbbr genericSet n PatWithType pat
     let getExprWithType genericSet (n:Syntax.TypeSyntax) e = getTypeAbbr genericSet n ExprWithType e
     
@@ -98,9 +119,10 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 descend e) |> ExprTuple
         args
     let defInit typ = 
-        let (TypeId t) = getType typ
+        //let (TypeId t) = getType typ
         //TODO: proper generic type
-        ExprVal (ValId (sprintf "Unchecked.defaultof<%s>" t))
+        //ExprVal (ValId (sprintf "Unchecked.defaultof<%s>" t))
+        ExprDefaultOf (getType typ)
     
     let getTextModifiers (n:SyntaxNode) =
         match n with
@@ -130,25 +152,22 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
     let getConvertedType (n: SyntaxNode) =
         let t = model.GetTypeInfo(n)
         let typ = if t.Type <> t.ConvertedType then t.ConvertedType else t.Type 
+        let (typeName,genPars) = getTypeInfoFromType typ
         let typeName =
             match typ.SpecialType with
             | SpecialType.System_Object -> "obj"
             | SpecialType.System_String -> "string"
-            | SpecialType.None -> typ.Name
-            | _ -> typ.Name
+            | SpecialType.None -> typeName
+            | _ -> typeName
             
-        let genPars =
-            match typ with
-            | :? INamedTypeSymbol as x -> x.TypeArguments |> Seq.map (fun t -> TypType (TypeId t.Name)) |> Seq.toList |> Some
-            | _ -> None
         typeName, genPars
     
     let haveConvertedType (n: SyntaxNode) = 
         let t = model.GetTypeInfo(n)
-        t.Type <> t.ConvertedType
+        t.Type <> null && t.Type <> t.ConvertedType
     
     let implicitConv (n: SyntaxNode) =
-        let ignoredConvs = ["IEnumerable"; ""] |> set
+        let ignoredConvs = ["System.Collections.IEnumerable"; ""] |> set
         let typ = 
            if haveConvertedType n then 
                let (t,gs) = getConvertedType n
@@ -237,7 +256,13 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | InvocationExpressionSyntax(e, args) -> ExprApp (descend e, printArgumentList args)
         | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, ExprVal (ValId <| name.ToFullString()))
         | BinaryExpressionSyntax(e1,op,e2) -> ExprInfixApp (descend e1, ValId (operatorRewrite op.Text), descend e2)
-        | AssignmentExpressionSyntax(e1,op,e2) -> ExprInfixApp (descend e1, ValId "<-", descend e2)
+        | AssignmentExpressionSyntax(e1,op,e2) -> 
+            let withOp o = ExprInfixApp (descend e1, ValId "<-", ExprInfixApp (descend e1, ValId o, descend e2)) 
+            match op.Text with
+            | "=" -> ExprInfixApp (descend e1, ValId "<-", descend e2)
+            | "+=" -> withOp "+" 
+            | "-=" -> withOp "-" 
+            
         | IdentifierNameSyntax(token) as n -> 
             let identInfo = model.GetSymbolInfo (n:SyntaxNode)
             let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text)

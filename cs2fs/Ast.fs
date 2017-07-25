@@ -63,7 +63,8 @@ and Expr =
 | ExprModule of ModuleId * Expr
 | ExprNamespace of NamespaceId * Expr
 | ExprType of TypeId * TypeDecl
-| ExprNew of TypeId * Expr
+| ExprNew of Typ * Expr
+| ExprDefaultOf of Typ
 | ExprInclude of ModuleId
 | ExprIf of Expr * Expr * Expr option
 | ExprFor of Pat * Expr * Expr
@@ -118,6 +119,7 @@ let rec exprIsValue =
     | ExprMatch _
     | ExprMatchLambda _
     | ExprNew _
+    | ExprDefaultOf _
     | ExprRecord _
     | ExprTuple _
     | ExprVal _ -> true
@@ -160,7 +162,8 @@ module rec Transforms =
         | ExprNamespace (m, e) -> ExprNamespace (m, eF e)
         | ExprModule (m, e) -> ExprModule (m, eF e)
         | ExprType (t, d) -> ExprType (t, dF d)
-        | ExprNew (t, e) -> ExprNew (t, eF e)
+        | ExprNew (t, e) -> ExprNew (tF t, eF e)
+        | ExprDefaultOf t -> ExprDefaultOf (tF t)
         | ExprIf (e1,e2,eo) -> ExprIf(eF e1, eF e2, Option.map eF eo)
         | ExprFor (p,e1,e2) -> ExprFor(pF p, eF e1, eF e2)
         | ExprWhile (e1,e2) -> ExprWhile(eF e1, eF e2)
@@ -169,7 +172,7 @@ module rec Transforms =
         | ExprMemberProperty (p, e, eo) -> ExprMemberProperty (pF p, eF e, Option.map eF eo)
         | ExprMemberPropertyWithSet (p, e, eo, eo2) -> ExprMemberPropertyWithSet (pF p, eF e, Option.map eF eo, Option.map eF eo2)
 
-        | ExprTypeConversion(t,e) -> ExprTypeConversion(t, eF e)
+        | ExprTypeConversion(t,e) -> ExprTypeConversion(tF t, eF e)
 
     let transformPat astF n = 
         let (eF, tF, pF, dF) = recFuncs astF
@@ -207,6 +210,11 @@ module rec Transforms =
         { ASTmapF.Default with
             ExprF = f
         } |> transformExpr
+        
+    let typMap f =
+        { ASTmapF.Default with
+            TypF = f
+        } |> transformExpr
 
     let exprMapOnce f =
         { ASTmapF.Default with
@@ -239,14 +247,15 @@ module rec Transforms =
     let entryPoint =
         let isMainMember =
             function
-            | ExprMember (ValId "Main", [], [Static], None, PatTuple [PatWithType(TypType (TypeId "string[]"), PatBind (ValId _))], _) -> true
-            | _ -> false
+            | ExprMember (ValId "Main", [], [Static], None, PatTuple [PatWithType(TypType (TypeId "string[]"), PatBind (ValId args))], _) -> Some [ExprVal (ValId args)]
+            | ExprMember (ValId "Main", [], [Static], None, PatTuple [], _) -> Some []
+            | _ -> None
         function
         | (ExprType (TypeId mainClass, TypeDeclClass (_, _, _, members))) as e ->
             printfn "EntryPoint"
-            members |> List.tryFind isMainMember |> Option.map (fun _ -> 
+            members |> Seq.choose isMainMember |> Seq.tryHead |> Option.map (fun callArgs -> 
                 printfn "EntryPoint"
-                let mainCall = ExprApp (ExprDotApp (ExprVal (ValId mainClass), ExprVal (ValId "Main")), ExprTuple [ExprVal (ValId "args")])
+                let mainCall = ExprApp (ExprDotApp (ExprVal (ValId mainClass), ExprVal (ValId "Main")), ExprTuple callArgs)
                 let mainBind = ExprAttribute([AttributeId "EntryPoint"], ExprBind ([], PatCons (ValId "main", [PatBind (ValId "args")]), ExprSequence [mainCall; ExprConst (ConstId "0")]))
                 Some <| ExprSequence [e; ExprModule (ModuleId (mainClass + "__run"), mainBind)]
             ) |> Option.fill None
@@ -260,3 +269,13 @@ module rec Transforms =
             Some <| ExprMember (v,t,m,v2,p,e')
         | _ -> None
         |> exprMapOnce
+        
+    let typeReplecement =
+        function
+        | TypWithGeneric(gs, TypType (TypeId "System.Func")) -> 
+            let (t::tup) = gs |> List.rev
+            TypFun (TypTuple (List.rev tup), t) |> Some
+        | TypWithGeneric(gs, TypType (TypeId "System.Action")) -> 
+            TypFun (TypTuple gs, TypType (TypeId "unit")) |> Some
+        | _ -> None
+        |> typMap

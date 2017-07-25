@@ -8,17 +8,12 @@ namespace ConsoleApplication3
 {
     class Example
     {
-        public void Main()
-        {
-            var i = 1.ToString();
-            var res = Console.ReadLine();
-            Console.WriteLine("You wrote " + res);
-        }
-
-        public void Conditionals()
+        public string Conditionals()
         {
             var x = 1 > 2 ? "a" : "b";
+            return x;
         }
+
         public string Arrays(string[] strings)
         {
             if (strings == null)
@@ -36,13 +31,14 @@ namespace ConsoleApplication3
             }
         }
 
-        public void Linq()
+        public List<int> Linq()
         {
             int[] ints = {1, 2, 3, 4, 5, 6, 7, 8};
             var big = ints.Where(i => i > 4).Select(i => i*2).ToList();
+            return big;
         }
 
-        public void Delegates()
+        public string Delegates()
         {
             Action<int, string> del = (a, b) =>
             {
@@ -50,11 +46,25 @@ namespace ConsoleApplication3
             };
             Func<int, string> del2 = a => "hello" + a;
             InvokeIt(del);
+            return del2(1);
         }
 
         private void InvokeIt(Action<int, string> del)
         {
             del(1, "hello");
+        }
+
+        public static void Main()
+        {
+            var i = 1.ToString();
+            Console.WriteLine(i);
+            var x = new Example();
+            Console.WriteLine(x.Conditionals());
+            Console.WriteLine(x.Arrays(null));
+            string[] strings = {"F","O","O"};
+            Console.WriteLine(x.Arrays(strings));
+            x.Linq().ForEach(y => Console.WriteLine(y));
+            Console.WriteLine(x.Delegates());
         }
     }
 }

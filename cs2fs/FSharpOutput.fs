@@ -86,7 +86,7 @@ let rec getTyp =
     | TypType (TypeId x) -> Text x
     | TypGeneric (GenericId x) -> Text ("'" + x)
     | TypWithGeneric(gs, x) -> getTyp x |++| getGenerics gs 
-    | TypFun(t1, t2) -> [t1; t2] |> Seq.map getTyp |> delimText " -> "
+    | TypFun(t1, t2) -> [t1; t2] |> Seq.map getTyp |> delimText " -> " |> surroundText "(" ")"
     | TypTuple(ts) -> ts |> Seq.map getTyp |> delimText " * " |> surroundText "(" ")"
 
 and getGenerics gs = 
@@ -159,6 +159,7 @@ and getExpr =
     | ExprConst (ConstId c) -> Text c
     | ExprVal (ValId v) -> Text v
     | ExprApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText " " |> surroundText "(" ")"
+    | ExprDotApp ((ExprConst _) as e1, e2) -> [getExpr e1 |> surroundText "(" ")"; getExpr e2] |> delimText "."
     | ExprDotApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText "."
     | ExprInfixApp (e1, ValId v, e2) -> [getExpr e1; Text v; getExpr e2] |> delimText " " |> surroundText "(" ")"
     | ExprTuple ts -> ts |> List.map getExpr |> delimSurroundText ", " "(" ")"
@@ -190,7 +191,8 @@ and getExpr =
         Text "type " |++| Text tId |++| getModifiers modifiers |++| getGenerics generics |++| getPat args |++| Text " =" |++| Line 
         |+>| (members |> Seq.map getMember |> lineblock)
     | ExprType (TypeId tId, t) -> Text "type " |++| Text tId |++| Text " = " |++| getDecl t
-    | ExprNew (TypeId tId, e) -> Text "new " |++| Text tId |++| getExpr e
+    | ExprNew (t, e) -> Text "new " |++| getTyp t |++| getExpr e
+    | ExprDefaultOf t -> Text "Unchecked.defaultof<" |++| getTyp t |++| Text ">"
     | ExprInclude (ModuleId m) -> Text "open " |++| Text m
     | ExprIf (cond, thenExpr, elseExprMaybe) ->
         Text "if " |++| getExpr cond |++| LineText "then" |++| indentLineBlock (getExpr thenExpr)
@@ -205,7 +207,16 @@ and getExpr =
         attrs |> List.map (fun (AttributeId x) -> Text x) |> delimSurroundText "; " "[<" ">]" |++| Line
         |++| getExpr e
       
-    | ExprTypeConversion (t, e) -> getExpr e |++| Text " :> " |++| (getTyp t) |> surroundText "(" ")"
+    | ExprTypeConversion (t, e) -> 
+        let def = getExpr e |++| Text " :> " |++| (getTyp t)
+        match t with
+        | TypType (TypeId tt) ->
+            match tt with
+            | "string" 
+            | "int" -> Text (tt + " ") |++| getExpr e
+            | _ -> def
+        | _ -> def
+        |> surroundText "(" ")"
 
 and getExprIndentIfSeq e =
     match e with
@@ -221,4 +232,5 @@ let toFs (Program e) =
     |> cs2fs.AST.Transforms.assignmentAsExpr
     |> cs2fs.AST.Transforms.binaryOpWithString
     |> cs2fs.AST.Transforms.entryPoint
+    |> cs2fs.AST.Transforms.typeReplecement
     |> getExpr
