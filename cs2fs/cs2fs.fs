@@ -269,7 +269,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | ConditionalExpressionSyntax(e1, _, e2, _, e3) ->
             ExprIf(descend e1, descend e2, Some (descend e3))
             
-        | InitializerExpressionSyntax(es) -> ExprList(es |> List.map descend)
+        | InitializerExpressionSyntax(es) -> ExprArray(es |> List.map descend)
             
         | _ -> misssingCaseExpr node
 

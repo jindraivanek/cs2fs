@@ -163,6 +163,7 @@ and getExpr =
     | ExprInfixApp (e1, ValId v, e2) -> [getExpr e1; Text v; getExpr e2] |> delimText " " |> surroundText "(" ")"
     | ExprTuple ts -> ts |> List.map getExpr |> delimSurroundText ", " "(" ")"
     | ExprList ts -> ts |> List.map getExpr |> delimSurroundText "; " "[" "]"
+    | ExprArray ts -> ts |> List.map getExpr |> delimSurroundText "; " "[|" "|]"
     | ExprRecord (copyE, rows) -> 
         let fields = rows |> Seq.map (fun (FieldId f, e) -> Text f |++| Text " = " |++| getExpr e) |> delimText "; " 
         let copyStat = copyE |> Option.map (fun x -> getExpr x |++| Text " with ") |> Option.fill (Text "")

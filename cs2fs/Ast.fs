@@ -50,6 +50,7 @@ and Expr =
 | ExprDotApp of Expr * Expr
 | ExprTuple of Expr list
 | ExprList of Expr list
+| ExprArray of Expr list
 | ExprRecord of Expr option * (FieldId * Expr) list // recordToCopy, fields
 | ExprSequence of Expr list // command1; commmand2; Expr
 | ExprBind of Modifier list * Pat * Expr // let x = expr1
@@ -113,6 +114,7 @@ let rec exprIsValue =
     | ExprIf(_,_,Some _)
     | ExprInfixApp _
     | ExprList _
+    | ExprArray _
     | ExprMatch _
     | ExprMatchLambda _
     | ExprNew _
@@ -145,6 +147,7 @@ module rec Transforms =
         | ExprInclude m -> ExprInclude m
         | ExprTuple es -> es |> List.map eF |> ExprTuple
         | ExprList es -> es |> List.map eF |> ExprList
+        | ExprArray es -> es |> List.map eF |> ExprArray
         | ExprRecord (me, fields) -> ((Option.map eF me), (fields |> List.map (fun (f, e) -> f, eF e))) |> ExprRecord
         | ExprSequence es -> es |> List.map eF |> ExprSequence
         | ExprBind (m, p, e) -> (m, pF p, eF e) |> ExprBind
