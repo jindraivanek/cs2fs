@@ -309,23 +309,6 @@ let convert (csTree: SyntaxTree) =
     let model = compilation.GetSemanticModel(csTree, true)
     csTree.GetRoot() |> convertNode true model
 
-let input = @"
-    public class MyClass
-    {
-        public int Prop { get; set; }
-        public int PropGet { get; }
-        public readonly int Field;
-        public int PropGet2 { get {return Field;} }
-        public int PropGetSet { get {var x=1; return x;} set {Field = value;} }
-        
-        private int MyMethod(int x, string s)
-        {
-            var y = x+1;
-            int z = y*2;
-            return x+y+z;
-        }
-    }"
-
 [<EntryPoint>]
 let main argv =
     let tree = CSharpSyntaxTree.ParseText(System.IO.File.ReadAllText argv.[0])
@@ -333,7 +316,6 @@ let main argv =
     let blockExpr = expr |> cs2fs.FSharpOutput.toFs
     let output = blockExpr |> cs2fs.FSharpOutput.printBlock
     expr |> (printfn "%A")
-    //blockExpr |> (printfn "%A")
     printfn "==========="
     if argv.Length > 1 then
         System.IO.File.WriteAllText(argv.[1], output) 

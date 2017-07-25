@@ -252,9 +252,7 @@ module rec Transforms =
             | _ -> None
         function
         | (ExprType (TypeId mainClass, TypeDeclClass (_, _, _, members))) as e ->
-            printfn "EntryPoint"
             members |> Seq.choose isMainMember |> Seq.tryHead |> Option.map (fun callArgs -> 
-                printfn "EntryPoint"
                 let mainCall = ExprApp (ExprDotApp (ExprVal (ValId mainClass), ExprVal (ValId "Main")), ExprTuple callArgs)
                 let mainBind = ExprAttribute([AttributeId "EntryPoint"], ExprBind ([], PatCons (ValId "main", [PatBind (ValId "args")]), ExprSequence [mainCall; ExprConst (ConstId "0")]))
                 Some <| ExprSequence [e; ExprModule (ModuleId (mainClass + "__run"), mainBind)]
