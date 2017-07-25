@@ -105,6 +105,25 @@ let rec simplify =
 
 let constIsString (ConstId c) = String.startsWith "\"" c && String.endsWith "\"" c
 
+let rec exprIsValue =
+    function
+    | ExprApp _
+    | ExprConst _
+    | ExprDotApp _
+    | ExprIf(_,_,Some _)
+    | ExprInfixApp _
+    | ExprList _
+    | ExprMatch _
+    | ExprMatchLambda _
+    | ExprNew _
+    | ExprRecord _
+    | ExprTuple _
+    | ExprVal _ -> true
+    | ExprWithType(_,e)
+    | ExprTypeConversion(_,e) -> exprIsValue e
+    | ExprSequence es -> es |> List.last |> exprIsValue
+    | _ -> false
+
 let applyAstF recurse f recF n = f n |> Option.map (if recurse then recF else id) |> Option.fillWith (fun () -> recF n) 
 
 module rec Transforms =
@@ -228,5 +247,13 @@ module rec Transforms =
                 let mainBind = ExprAttribute([AttributeId "EntryPoint"], ExprBind ([], PatCons (ValId "main", [PatBind (ValId "args")]), ExprSequence [mainCall; ExprConst (ConstId "0")]))
                 Some <| ExprSequence [e; ExprModule (ModuleId (mainClass + "__run"), mainBind)]
             ) |> Option.fill None
+        | _ -> None
+        |> exprMapOnce
+        
+    let unitAfterSequenceWithoutValue =
+        function
+        | ExprMember (v,t,m,v2,p,e) -> 
+            let e' = if not(exprIsValue e) then ExprSequence [e; ExprVal (ValId "()")] else e
+            Some <| ExprMember (v,t,m,v2,p,e')
         | _ -> None
         |> exprMapOnce

@@ -213,7 +213,9 @@ and getExprIndentIfSeq e =
 and getExprIndentWithParIfSeq e = getExprIndentIfSeq e |> surroundText "(" ")"
 
 let toFs (Program e) =
-    e |> cs2fs.AST.simplify 
+    e 
+    |> cs2fs.AST.Transforms.unitAfterSequenceWithoutValue
+    |> cs2fs.AST.simplify 
     |> cs2fs.AST.Transforms.globalNamespace
     |> cs2fs.AST.Transforms.assignmentAsExpr
     |> cs2fs.AST.Transforms.binaryOpWithString
