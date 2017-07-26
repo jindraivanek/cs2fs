@@ -1,6 +1,10 @@
 source https://www.nuget.org/api/v2
+framework: =net45
 nuget ExtCore
 nuget FAKE
 nuget FSharp.Core
 nuget Microsoft.CodeAnalysis.CSharp
 nuget Microsoft.CodeAnalysis.ActivePatterns
+nuget Microsoft.Net.Compilers
+nuget FSharp.Compiler.Tools
+nuget Expecto
