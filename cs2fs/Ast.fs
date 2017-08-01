@@ -48,6 +48,7 @@ and Expr =
 | ExprApp of Expr * Expr //application
 | ExprInfixApp of Expr * ValId * Expr
 | ExprDotApp of Expr * Expr
+| ExprItemApp of Expr * Expr // e1.[e2]
 | ExprTuple of Expr list
 | ExprList of Expr list
 | ExprArray of Expr list
@@ -77,6 +78,7 @@ and Expr =
 | ExprAttribute of AttributeId list * Expr
 
 | ExprTypeConversion of Typ * Expr
+| ExprArrayInit of Typ * Expr list // array type, array sizes
 
 and Match = Pat * Expr option * Expr
 
@@ -144,6 +146,7 @@ module rec Transforms =
         | ExprApp(e1, e2) -> ExprApp(eF e1, eF e2)
         | ExprInfixApp(e1, op, e2) -> ExprInfixApp(eF e1, op, eF e2)
         | ExprDotApp(e1, e2) -> ExprDotApp(eF e1, eF e2)
+        | ExprItemApp(e1, e2) -> ExprItemApp(eF e1, eF e2)
         | ExprConst c -> ExprConst c
         | ExprVal v -> ExprVal v
         | ExprInclude m -> ExprInclude m
@@ -173,6 +176,7 @@ module rec Transforms =
         | ExprMemberPropertyWithSet (p, e, eo, eo2) -> ExprMemberPropertyWithSet (pF p, eF e, Option.map eF eo, Option.map eF eo2)
 
         | ExprTypeConversion(t,e) -> ExprTypeConversion(tF t, eF e)
+        | ExprArrayInit(t,rs) -> ExprArrayInit(tF t, List.map eF rs)
 
     let transformPat astF n = 
         let (eF, tF, pF, dF) = recFuncs astF

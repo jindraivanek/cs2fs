@@ -161,6 +161,7 @@ and getExpr =
     | ExprApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText " " |> surroundText "(" ")"
     | ExprDotApp ((ExprConst _) as e1, e2) -> [getExpr e1 |> surroundText "(" ")"; getExpr e2] |> delimText "."
     | ExprDotApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText "."
+    | ExprItemApp (e1, e2) -> [getExpr e1; surroundText "[" "]" (e2 |> getExpr)] |> delimText "."
     | ExprInfixApp (e1, ValId v, e2) -> [getExpr e1; Text v; getExpr e2] |> delimText " " |> surroundText "(" ")"
     | ExprTuple ts -> ts |> List.map getExpr |> delimSurroundText ", " "(" ")"
     | ExprList ts -> ts |> List.map getExpr |> delimSurroundText "; " "[" "]"
@@ -217,6 +218,16 @@ and getExpr =
             | _ -> def
         | _ -> def
         |> surroundText "(" ")"
+    | ExprArrayInit (t, ranks) ->
+        let n = List.length ranks
+        let arrayModule =
+            match n with
+            | 1 -> "Array"
+            | 2 -> "Array2D"
+            | 3 -> "Array3D"
+            | 4 -> "Array4D"
+            | _ -> failwith "not supported array rank"
+        Text (arrayModule + ".zeroCreate ") |++| (ranks |> Seq.map getExpr |> delimText " ")
 
 and getExprIndentIfSeq e =
     match e with

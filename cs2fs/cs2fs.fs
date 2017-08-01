@@ -36,7 +36,13 @@ let (|ArgumentListSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     | :? Microsoft.CodeAnalysis.CSharp.Syntax.ArgumentListSyntax as node ->
       Some (node.OpenParenToken, node.Arguments |> Seq.toList, node.CloseParenToken)
     | _ -> None
-    
+
+let (|BracketedArgumentListSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
+    match node with
+    | :? Microsoft.CodeAnalysis.CSharp.Syntax.BracketedArgumentListSyntax as node ->
+      Some (node.Arguments |> Seq.toList)
+    | _ -> None
+
 let (|FieldDeclarationSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     match node with
     | :? Microsoft.CodeAnalysis.CSharp.Syntax.FieldDeclarationSyntax as node ->
@@ -49,6 +55,17 @@ let (|InitializerExpressionSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
       Some (node.Expressions |> Seq.toList)
     | _ -> None
 
+let (|ArrayCreationExpressionSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
+    match node with
+    | :? Microsoft.CodeAnalysis.CSharp.Syntax.ArrayCreationExpressionSyntax as node ->
+      Some (node.Type.ElementType, node.Type.RankSpecifiers |> Seq.toList)
+    | _ -> None
+
+let (|ForStatementSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
+    match node with
+    | :? Microsoft.CodeAnalysis.CSharp.Syntax.ForStatementSyntax as node ->
+      Some (node.Declaration, node.Condition, node.Incrementors |> Seq.toList, node.Statement)
+    | _ -> None
     
 let rec getParentOfType<'t when 't :> SyntaxNode> (node: SyntaxNode) =
     match node.Parent with
@@ -113,11 +130,14 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 prms |> List.map (getParameterSyntax generics) 
             prms |> PatTuple
     
-    let printArgumentList (ArgumentListSyntax(_, args, _)) =
-        let args = 
-            args |> List.map (fun (ArgumentSyntax(_, refOrOut, e)) -> 
-                descend e) |> ExprTuple
-        args
+    let printArgumentList =
+        function
+        | ArgumentListSyntax(_, args, _)
+        | BracketedArgumentListSyntax args ->
+            let args = 
+                args |> List.map (fun (ArgumentSyntax(_, refOrOut, e)) -> 
+                    descend e) |> ExprTuple
+            args
     let defInit typ = 
         //let (TypeId t) = getType typ
         //TODO: proper generic type
@@ -255,6 +275,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | ParenthesizedLambdaExpressionSyntax(_, pars, _, e) -> ExprLambda([printParamaterList [] pars], descend e)
         | InvocationExpressionSyntax(e, args) -> ExprApp (descend e, printArgumentList args)
         | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, ExprVal (ValId <| name.ToFullString()))
+        | ElementAccessExpressionSyntax(e, args) -> ExprItemApp (descend e, printArgumentList args)
         | BinaryExpressionSyntax(e1,op,e2) -> ExprInfixApp (descend e1, ValId (operatorRewrite op.Text), descend e2)
         | AssignmentExpressionSyntax(e1,op,e2) -> 
             let withOp o = ExprInfixApp (descend e1, ValId "<-", ExprInfixApp (descend e1, ValId o, descend e2)) 
@@ -262,6 +283,20 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             | "=" -> ExprInfixApp (descend e1, ValId "<-", descend e2)
             | "+=" -> withOp "+" 
             | "-=" -> withOp "-" 
+        | PrefixUnaryExpressionSyntax(op,e) as n ->
+            let withOp o c = [ExprInfixApp (descend e, ValId "<-", ExprInfixApp (descend e, ValId o, ExprConst (ConstId c))); descend e] |> sequence
+            match op.Text with
+            | "++" -> withOp "+" "1"
+            | "--" -> withOp "-" "1"
+            | "!" -> ExprApp(ExprVal(ValId "not"), descend e)
+            | x -> printfn "Unknown prefix operator: %s" x; misssingCaseExpr n
+        | PostfixUnaryExpressionSyntax(e,op) as n ->
+            //TODO: correct postfix operator sequence
+            let withOp o c = [ExprInfixApp (descend e, ValId "<-", ExprInfixApp (descend e, ValId o, ExprConst (ConstId c))); descend e] |> sequence
+            match op.Text with
+            | "++" -> withOp "+" "1"
+            | "--" -> withOp "-" "1"
+            | x -> printfn "Unknown postfix operator: %s" x; misssingCaseExpr n
             
         | IdentifierNameSyntax(token) as n -> 
             let identInfo = model.GetSymbolInfo (n:SyntaxNode)
@@ -288,6 +323,11 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ExprWhile (descend e, descend stmt)
         | ForEachStatementSyntax(_, _, typ, ident, _, e, _, stmt) ->
             ExprFor (ValId ident.Text |> PatBind |> getTypePat (set[]) typ, descend e, descend stmt)
+        | ForStatementSyntax(varDecl, cond, postActions, stmt) ->
+            let binds = getVariableDeclarators varDecl
+            let bindsExpr = binds |> Seq.map (fun (p,e) -> ExprBind(getMutableModifier varDecl, p, e)) |> sequence
+            let bodyExpr = [descend stmt] @ (postActions |> Seq.map descend |> Seq.toList) |> sequence
+            [bindsExpr; ExprWhile (descend cond, bodyExpr)] |> sequence
         | IfStatementSyntax(_, _, e, _, stmt, elseStmt) ->
             ExprIf(descend e, descend stmt, elseStmt |> Option.ofObj |> Option.map descend)
         | ElseClauseSyntax(_,e) -> descend e
@@ -295,6 +335,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ExprIf(descend e1, descend e2, Some (descend e3))
             
         | InitializerExpressionSyntax(es) -> ExprArray(es |> List.map descend)
+        | ArrayCreationExpressionSyntax(t, rs) -> ExprArrayInit (getType t, rs |> List.collect (fun r -> r.Sizes |> Seq.map descend |> Seq.toList))
             
         | _ -> misssingCaseExpr node
 
