@@ -64,7 +64,7 @@ let (|ArrayCreationExpressionSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode)
 let (|ForStatementSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     match node with
     | :? Microsoft.CodeAnalysis.CSharp.Syntax.ForStatementSyntax as node ->
-      Some (node.Declaration, node.Condition, node.Incrementors |> Seq.toList, node.Statement)
+      Some (node.Declaration, node.Initializers |> Seq.toList, node.Condition, node.Incrementors |> Seq.toList, node.Statement)
     | _ -> None
     
 let rec getParentOfType<'t when 't :> SyntaxNode> (node: SyntaxNode) =
@@ -74,7 +74,9 @@ let rec getParentOfType<'t when 't :> SyntaxNode> (node: SyntaxNode) =
     | p -> getParentOfType p
 
 let rec missingCaseTreePrinter (n : SyntaxNode) =
-    "[!" + n.GetType().ToString() + "(" + (n.ChildNodes() |> Seq.map missingCaseTreePrinter |> String.concat "") + ")!]"
+    match n with
+    | null -> "[!null!]"
+    | _ -> "[!" + n.GetType().ToString() + "(" + (n.ChildNodes() |> Seq.map missingCaseTreePrinter |> String.concat "") + ")!]"
 
 let misssingCaseExpr n = ExprVal (ValId <| missingCaseTreePrinter n)
 
@@ -210,7 +212,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 (function
                  | VariableDeclaratorSyntax(ident, args, init) -> 
                      ValId ident.Text |> PatBind |> getTypePat (set[]) typ, descendOption init (defInit typ))
-        | _ -> failwith <| missingCaseTreePrinter n
+        | _ -> seq [PatConst(ConstId "getVariableDeclarators"), misssingCaseExpr n] //<| "getVariableDeclarators " + missingCaseTreePrinter n
     
     let getGenerics p =
         match p with
@@ -246,7 +248,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 else ExprMemberPropertyWithSet (p, e, None, None)
                  |> applyAttributes attrs
             ) |> Seq.toList
-        | _ -> failwith <| missingCaseTreePrinter n
+        | _ -> failwith <| "GetMembers " + missingCaseTreePrinter n
 
     let exprF node =
         match node with
@@ -323,11 +325,12 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ExprWhile (descend e, descend stmt)
         | ForEachStatementSyntax(_, _, typ, ident, _, e, _, stmt) ->
             ExprFor (ValId ident.Text |> PatBind |> getTypePat (set[]) typ, descend e, descend stmt)
-        | ForStatementSyntax(varDecl, cond, postActions, stmt) ->
-            let binds = getVariableDeclarators varDecl
-            let bindsExpr = binds |> Seq.map (fun (p,e) -> ExprBind(getMutableModifier varDecl, p, e)) |> sequence
+        | ForStatementSyntax(varDecl, initActions, cond, postActions, stmt) ->
+            let binds = varDecl |> Option.ofObj |> Option.map getVariableDeclarators 
+            let bindsExpr = binds |> Option.map (Seq.map (fun (p,e) -> ExprBind(getMutableModifier varDecl, p, e)) >> Seq.toList) |> Option.fill []
+            let initExpr = bindsExpr @ (initActions |> Seq.map descend |> Seq.toList) |> sequence
             let bodyExpr = [descend stmt] @ (postActions |> Seq.map descend |> Seq.toList) |> sequence
-            [bindsExpr; ExprWhile (descend cond, bodyExpr)] |> sequence
+            [initExpr; ExprWhile (descend cond, bodyExpr)] |> sequence |> ExprDo
         | IfStatementSyntax(_, _, e, _, stmt, elseStmt) ->
             ExprIf(descend e, descend stmt, elseStmt |> Option.ofObj |> Option.map descend)
         | ElseClauseSyntax(_,e) -> descend e

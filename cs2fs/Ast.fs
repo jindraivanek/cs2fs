@@ -70,6 +70,7 @@ and Expr =
 | ExprIf of Expr * Expr * Expr option
 | ExprFor of Pat * Expr * Expr
 | ExprWhile of cond: Expr * body: Expr
+| ExprDo of Expr // do block
 
 | ExprMember of ValId * Typ list * Modifier list * ValId option * Pat * Expr
 | ExprMemberProperty of Pat * Expr * Expr option
@@ -170,6 +171,7 @@ module rec Transforms =
         | ExprIf (e1,e2,eo) -> ExprIf(eF e1, eF e2, Option.map eF eo)
         | ExprFor (p,e1,e2) -> ExprFor(pF p, eF e1, eF e2)
         | ExprWhile (e1,e2) -> ExprWhile(eF e1, eF e2)
+        | ExprDo e -> ExprDo (eF e)
         | ExprAttribute (a,e) -> ExprAttribute (a, eF e)
         | ExprMember (v, gs, ms, vo, p, e) -> ExprMember(v, gs, ms, vo, pF p, eF e)
         | ExprMemberProperty (p, e, eo) -> ExprMemberProperty (pF p, eF e, Option.map eF eo)

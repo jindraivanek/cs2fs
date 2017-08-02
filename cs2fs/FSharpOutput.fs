@@ -202,6 +202,7 @@ and getExpr =
         Text "for " |++| getPat pat |++| Text " in " |++| getExpr collection |++| Text " do" |++| indentLineBlock (getExpr expr)
     | ExprWhile (cond, expr) ->
         Text "while " |++| getExprIndentWithParIfSeq cond |++| Text " do" |++| indentLineBlock (getExpr expr)
+    | ExprDo expr -> Text "do " |++| indentLineBlock (getExpr expr)  
     | ExprSequence es -> 
         es |> Seq.map getExpr |> delimLineText ""
     | ExprAttribute (attrs, e) ->
