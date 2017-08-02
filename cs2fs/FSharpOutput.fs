@@ -16,6 +16,12 @@ type Block =
     | Line
     | IndentBlock of Block
     | Block of Block list
+
+let rec mapBlock f =
+    function
+    | Block bs -> List.map (mapBlock f) bs |> Block |> f
+    | IndentBlock b -> mapBlock f b |> IndentBlock |> f
+    | x -> f x
     
 let printBlock block =
     let printIndent x = ([1..x] |> Seq.map (fun _ -> "    ") |> String.concat "")
@@ -61,6 +67,11 @@ let delimLineText sep xs = xs |> Seq.toList |> intersperse (Line |++| Text sep) 
 let surroundText head tail body = Text head |++| body |++| Text tail
 let delimSurroundText sep head tail xs = xs |> (delimText sep >> surroundText head tail)
 
+let singleLiner b =
+    function
+    | Line -> Text "; "
+    | x -> x
+    |> (fun f -> mapBlock f b)
 
 let getModifier =
     function
@@ -162,7 +173,7 @@ and getExpr =
     | ExprDotApp ((ExprConst _) as e1, e2) -> [getExpr e1 |> surroundText "(" ")"; getExpr e2] |> delimText "."
     | ExprDotApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText "."
     | ExprItemApp (e1, e2) -> [getExpr e1; surroundText "[" "]" (e2 |> getExpr)] |> delimText "."
-    | ExprInfixApp (e1, ValId v, e2) -> [getExpr e1; Text v; getExpr e2] |> delimText " " |> surroundText "(" ")"
+    | ExprInfixApp (e1, ValId v, e2) -> [singleLiner (getExpr e1); Text v; singleLiner (getExpr e2)] |> delimText " " |> surroundText "(" ")"
     | ExprTuple ts -> ts |> List.map getExpr |> delimSurroundText ", " "(" ")"
     | ExprList ts -> ts |> List.map getExpr |> delimSurroundText "; " "[" "]"
     | ExprArray ts -> ts |> List.map getExpr |> delimSurroundText "; " "[|" "|]"
@@ -210,7 +221,7 @@ and getExpr =
         |++| getExpr e
       
     | ExprTypeConversion (t, e) -> 
-        let def = getExpr e |++| Text " :> " |++| (getTyp t)
+        let def = (surroundText "(" ")" <| getExpr e) |++| Text " :> " |++| (getTyp t)
         match t with
         | TypType (TypeId tt) ->
             match tt with
