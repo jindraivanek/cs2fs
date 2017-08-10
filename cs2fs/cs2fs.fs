@@ -79,6 +79,7 @@ let rec missingCaseTreePrinter (n : SyntaxNode) =
     | _ -> "[!" + n.GetType().ToString() + "(" + (n.ChildNodes() |> Seq.map missingCaseTreePrinter |> String.concat "") + ")!]"
 
 let misssingCaseExpr n = ExprVal (ValId <| missingCaseTreePrinter n)
+let exceptionExpr (e:System.Exception) n = ExprVal (ValId (sprintf "Exception: %A %A %s" e e.StackTrace <| missingCaseTreePrinter n))
 
 let fullName (n: ISymbol) =
     let rec f (n: ISymbol) = 
@@ -303,7 +304,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | IdentifierNameSyntax(token) as n -> 
             let identInfo = model.GetSymbolInfo (n:SyntaxNode)
             let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text)
-            let isThis = identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(token.Text.StartsWith("this."))
+            let isThis = Option.attempt (fun () -> identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(token.Text.StartsWith("this."))) |> Option.fill false
             ExprVal <| (ValId <| (if isThis then "this." else "") +  token.Text)
         | LiteralExpressionSyntax(token) as n -> ExprConst <| ConstId (token.Text)
         | ExpressionStatementSyntax(_,expr,_) -> descend expr
@@ -342,10 +343,13 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         
         | _ -> misssingCaseExpr node
 
-    if tryImplicitConv then
-        implicitConv node |> Option.map (fun t -> ExprTypeConversion (t, descendNoImplicit node)) 
-        |> Option.fill (exprF node)
-    else exprF node
+    try
+        if tryImplicitConv then
+            implicitConv node |> Option.map (fun t -> 
+                ExprTypeConversion (t, descendNoImplicit node)) 
+            |> Option.fill (exprF node)
+        else exprF node
+    with e -> exceptionExpr e node
 
 let convert (csTree: SyntaxTree) =
     let (@@) x y = System.IO.Path.Combine(x,y)
