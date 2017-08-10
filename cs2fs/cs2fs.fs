@@ -339,7 +339,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             
         | InitializerExpressionSyntax(es) -> ExprArray(es |> List.map descend)
         | ArrayCreationExpressionSyntax(t, rs) -> ExprArrayInit (getType t, rs |> List.collect (fun r -> r.Sizes |> Seq.map descend |> Seq.toList))
-            
+        
         | _ -> misssingCaseExpr node
 
     if tryImplicitConv then
@@ -348,7 +348,9 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
     else exprF node
 
 let convert (csTree: SyntaxTree) =
-    let mscorlib = MetadataReference.CreateFromFile(typeof<obj>.Assembly.Location)
+    let (@@) x y = System.IO.Path.Combine(x,y)
+    let mscorlibPath = (System.AppContext.GetData("FX_DEPS_FILE") |> string |> System.IO.DirectoryInfo).Parent.FullName @@ "mscorlib.dll"
+    let mscorlib = MetadataReference.CreateFromFile(mscorlibPath)
     let compilation = CSharpCompilation.Create("MyCompilation", syntaxTrees = [| csTree |], references = [| mscorlib |])
     let model = compilation.GetSemanticModel(csTree, true)
     csTree.GetRoot() |> convertNode true model

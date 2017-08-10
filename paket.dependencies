@@ -1,10 +1,13 @@
+source D:\dev\github\ExtCore\ExtCore.netcore\bin\Debug
 source https://www.nuget.org/api/v2
-framework: net46
-nuget ExtCore
+framework: netstandard1.6
+//nuget ExtCore
+github jindraivanek/ExtCore:netcore 
 nuget FAKE
 nuget FSharp.Core
 nuget Microsoft.CodeAnalysis.CSharp
-nuget Microsoft.CodeAnalysis.ActivePatterns
-nuget Microsoft.Net.Compilers
-nuget FSharp.Compiler.Tools
+//nuget Microsoft.CodeAnalysis.ActivePatterns
+github kekyo/Microsoft.CodeAnalysis.ActivePatterns Microsoft.CodeAnalysis.ActivePatterns/CSharpActivePatterns.fs
 nuget Expecto
+nuget FSharp.Compiler.Tools
+nuget Microsoft.Net.Compilers

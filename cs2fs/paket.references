@@ -1,4 +1,5 @@
 FSharp.Core
-ExtCore
+//ExtCore
 Microsoft.CodeAnalysis.CSharp
-Microsoft.CodeAnalysis.ActivePatterns
+//Microsoft.CodeAnalysis.ActivePatterns
+File: CSharpActivePatterns.fs
