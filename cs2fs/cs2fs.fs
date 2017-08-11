@@ -73,10 +73,17 @@ let rec getParentOfType<'t when 't :> SyntaxNode> (node: SyntaxNode) =
     | :? 't as p -> Some p
     | p -> getParentOfType p
 
-let rec missingCaseTreePrinter (n : SyntaxNode) =
-    match n with
-    | null -> "[!null!]"
-    | _ -> "[!" + n.GetType().ToString() + "(" + (n.ChildNodes() |> Seq.map missingCaseTreePrinter |> String.concat "") + ")!]"
+let missingCaseTreePrinter (n : SyntaxNode) =
+    let parents = 
+        n |> Seq.unfold (fun x -> 
+            x |> Option.ofObj |> Option.bind (fun x -> Option.ofObj x.Parent) |> Option.map (fun x -> x,x)) 
+        |> Seq.rev |> Seq.map (fun x -> x.GetType().ToString()) |> String.concat " - "
+    let rec f (n : SyntaxNode) =
+        match n with
+        | null -> "[!null!]"
+        | _ -> 
+            "[!" + n.GetType().ToString() + "(" + (n.ChildNodes() |> Seq.map f |> String.concat "") + ")!]"
+    parents + " -- " + f n
 
 let misssingCaseExpr n = ExprVal (ValId <| missingCaseTreePrinter n)
 let exceptionExpr (e:System.Exception) n = ExprVal (ValId (sprintf "Exception: %A %A %s" e e.StackTrace <| missingCaseTreePrinter n))
