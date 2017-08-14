@@ -1,6 +1,6 @@
 source D:\dev\github\ExtCore\ExtCore.netcore\bin\Debug
 source https://www.nuget.org/api/v2
-framework: netstandard1.6
+framework: netstandard2.0
 //nuget ExtCore
 github jindraivanek/ExtCore:netcore 
 nuget FAKE
