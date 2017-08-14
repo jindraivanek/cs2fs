@@ -154,6 +154,7 @@ and getMember x =
         |++| getGenerics generics |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
     | ExprMemberProperty (pat, init, getter) -> property pat init getter (false, None)
     | ExprMemberPropertyWithSet (pat, init, getter, setter) -> property pat init getter (true, setter)
+    | ExprInterfaceImpl e -> Text "interface " |++| getExpr e
     | ExprAttribute (attrs, e) -> 
         attrs |> List.map (fun (AttributeId x) -> Text x) |> delimSurroundText "; " "[<" ">]" |++| Line
         |++| getMember e

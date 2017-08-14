@@ -210,10 +210,13 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ExprNamespace <| (NamespaceId <| name.ToString(),
                 ((usings |> Seq.map descend |> sequence)
                 |++| (members |> Seq.map descend |> sequence)))
-        | ClassDeclarationSyntax(attrs,keyword,ident,typePars,bases,constrs,_,members,_,_) as n ->
+        | ClassDeclarationSyntax(attrs,keyword,ident,typePars, BaseListSyntax bases,constrs,_,members,_,_) as n ->
             let gs = getGenerics typePars
+            let interfaces = model.GetTypeInfo(n:SyntaxNode).Type.Interfaces |> Seq.map (fun i -> fullName i)
+            //bases |> List.map (fun b -> b.I)
+            let interfaceMembers = interfaces |> Seq.map (fun x -> ExprInterfaceImpl (ExprVal (ValId x))) |> Seq.toList
             ExprType (TypeId ident.Text,
-                TypeDeclClass (getModifiers node, gs, PatTuple[], (members |> List.collect (getMembers gs))))
+                TypeDeclClass (getModifiers node, gs, PatTuple[], (members |> List.collect (getMembers gs)) @ interfaceMembers))
             |> applyAttributes attrs
         
         | BlockSyntax(_x,stmts,_) -> 

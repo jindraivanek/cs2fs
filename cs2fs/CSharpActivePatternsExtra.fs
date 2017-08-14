@@ -41,10 +41,9 @@ let (|BracketedArgumentListSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
 
 let (|BaseListSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     match node with
-    | :? Microsoft.CodeAnalysis.CSharp.Syntax.ArgumentListSyntax as node ->
-      Some (node.OpenParenToken, node.Arguments |> Seq.toList, node.CloseParenToken)
+    | :? Microsoft.CodeAnalysis.CSharp.Syntax.BaseListSyntax as node ->
+      Some (node.Types |> Seq.toList)
     | _ -> None
-
 
 let (|FieldDeclarationSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     match node with

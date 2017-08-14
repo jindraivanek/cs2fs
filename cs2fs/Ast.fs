@@ -75,6 +75,7 @@ and Expr =
 | ExprMember of ValId * Typ list * Modifier list * ValId option * Pat * Expr
 | ExprMemberProperty of Pat * Expr * Expr option
 | ExprMemberPropertyWithSet of Pat * Expr * Expr option * Expr option
+| ExprInterfaceImpl of Expr
 
 | ExprAttribute of AttributeId list * Expr
 
