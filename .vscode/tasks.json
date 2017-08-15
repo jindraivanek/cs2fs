@@ -1,0 +1,35 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+    "taskName": "restore cs2fs",
+    "command": "dotnet",
+    "type": "shell",
+    "args": [
+        "restore",
+        "cs2fs/cs2fs.fsproj"
+    ],
+    "presentation": {
+        "reveal": "silent"
+    },
+    "problemMatcher": "$msCompile"
+},
+{
+    "taskName": "build cs2fs",
+    "command": "dotnet",
+    "type": "shell",
+    "group": "build",
+    "args": [
+        "build",
+        "cs2fs/cs2fs.fsproj"
+    ],
+    "dependsOn": "restore cs2fs",
+    "presentation": {
+        "reveal": "silent"
+    },
+    "problemMatcher": "$msCompile"
+}
+    ]
+}
