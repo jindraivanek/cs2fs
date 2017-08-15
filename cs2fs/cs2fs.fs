@@ -25,7 +25,7 @@ let missingCaseTreePrinter (n : SyntaxNode) =
             "[!" + n.GetType().ToString() + "(" + (n.ChildNodes() |> Seq.map f |> String.concat "") + ")!]"
     parents + " -- " + f n
 
-let misssingCaseExpr n = ExprVal (ValId <| missingCaseTreePrinter n)
+let misssingCaseExpr n = ExprVal (ValId <| sprintf "Missing case: %A %s" n (missingCaseTreePrinter n))
 let exceptionExpr (e:System.Exception) n = ExprVal (ValId (sprintf "Exception: %A %A %s" e e.StackTrace <| missingCaseTreePrinter n))
 
 let fullName (n: ISymbol) =
@@ -198,7 +198,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ) |> Seq.toList
         | _ -> failwith <| "GetMembers " + missingCaseTreePrinter n
 
-    let exprF node =
+    let exprF (node: SyntaxNode) =
         match node with
         | CompilationUnitSyntax(aliases, usings, attrs, members, _) ->
             (usings |> Seq.map descend |> sequence)
@@ -210,10 +210,14 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ExprNamespace <| (NamespaceId <| name.ToString(),
                 ((usings |> Seq.map descend |> sequence)
                 |++| (members |> Seq.map descend |> sequence)))
-        | ClassDeclarationSyntax(attrs,keyword,ident,typePars, BaseListSyntax bases,constrs,_,members,_,_) as n ->
+        | ClassDeclarationSyntax(attrs,keyword,ident,typePars, bases,constrs,_,members,_,_) as n ->
+            let c = n :?> Syntax.ClassDeclarationSyntax
+            let s = model.GetDeclaredSymbol(c)
+            let baseT = s.BaseType |> Option.ofObj
             let gs = getGenerics typePars
-            let interfaces = model.GetTypeInfo(n:SyntaxNode).Type.Interfaces |> Seq.map (fun i -> fullName i)
-            //bases |> List.map (fun b -> b.I)
+            let interfaces = bases |> (function |BaseListSyntax bases -> bases |> List.map (fun b -> b.ToFullString()) |> List.filter (fun b -> baseT |> Option.forall (fun x -> x.Name <> b)) |_->[])
+            //bases |> (function |BaseListSyntax bases -> bases |> List.iter (fun b -> printfn "%A %A" b (baseT |> Option.forall (fun x -> x.Name = b.ToFullString()))) |_->())
+            //printfn "%A" (model.GetDeclaredSymbol(c).BaseType.Name)
             let interfaceMembers = interfaces |> Seq.map (fun x -> ExprInterfaceImpl (ExprVal (ValId x))) |> Seq.toList
             ExprType (TypeId ident.Text,
                 TypeDeclClass (getModifiers node, gs, PatTuple[], (members |> List.collect (getMembers gs)) @ interfaceMembers))
@@ -299,7 +303,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 ExprTypeConversion (t, descendNoImplicit node)) 
             |> Option.fill (exprF node)
         else exprF node
-    with e -> exceptionExpr e node
+    with e -> 
+        exceptionExpr e node
 
 let convert (csTree: SyntaxTree) =
     let (@@) x y = System.IO.Path.Combine(x,y)

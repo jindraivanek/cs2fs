@@ -177,6 +177,7 @@ module rec Transforms =
         | ExprMember (v, gs, ms, vo, p, e) -> ExprMember(v, gs, ms, vo, pF p, eF e)
         | ExprMemberProperty (p, e, eo) -> ExprMemberProperty (pF p, eF e, Option.map eF eo)
         | ExprMemberPropertyWithSet (p, e, eo, eo2) -> ExprMemberPropertyWithSet (pF p, eF e, Option.map eF eo, Option.map eF eo2)
+        | ExprInterfaceImpl (e) -> ExprInterfaceImpl (eF e)
 
         | ExprTypeConversion(t,e) -> ExprTypeConversion(tF t, eF e)
         | ExprArrayInit(t,rs) -> ExprArrayInit(tF t, List.map eF rs)
