@@ -198,7 +198,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ) |> Seq.toList
         | _ -> failwith <| "GetMembers " + missingCaseTreePrinter n
 
-    let exprF node =
+    let exprF (node: SyntaxNode) =
         match node with
         | CompilationUnitSyntax(aliases, usings, attrs, members, _) ->
             (usings |> Seq.map descend |> sequence)
@@ -212,7 +212,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 |++| (members |> Seq.map descend |> sequence)))
         | ClassDeclarationSyntax(attrs,keyword,ident,typePars, BaseListSyntax bases,constrs,_,members,_,_) as n ->
             let gs = getGenerics typePars
-            let interfaces = model.GetTypeInfo(n:SyntaxNode).Type.Interfaces |> Seq.map (fun i -> fullName i)
+            let c = n :?> Syntax.ClassDeclarationSyntax
+            let interfaces = model.GetDeclaredSymbol(c).AllInterfaces |> Seq.map (fun i -> fullName i)
             //bases |> List.map (fun b -> b.I)
             let interfaceMembers = interfaces |> Seq.map (fun x -> ExprInterfaceImpl (ExprVal (ValId x))) |> Seq.toList
             ExprType (TypeId ident.Text,
@@ -299,7 +300,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 ExprTypeConversion (t, descendNoImplicit node)) 
             |> Option.fill (exprF node)
         else exprF node
-    with e -> exceptionExpr e node
+    with e -> exceptionExpr e node; reraise()
 
 let convert (csTree: SyntaxTree) =
     let (@@) x y = System.IO.Path.Combine(x,y)
