@@ -215,10 +215,14 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let s = model.GetDeclaredSymbol(c)
             let baseT = s.BaseType |> Option.ofObj
             let gs = getGenerics typePars
-            let interfaces = bases |> (function |BaseListSyntax bases -> bases |> List.map (fun b -> b.ToFullString()) |> List.filter (fun b -> baseT |> Option.forall (fun x -> x.Name <> b)) |_->[])
-            //bases |> (function |BaseListSyntax bases -> bases |> List.iter (fun b -> printfn "%A %A" b (baseT |> Option.forall (fun x -> x.Name = b.ToFullString()))) |_->())
-            //printfn "%A" (model.GetDeclaredSymbol(c).BaseType.Name)
-            let interfaceMembers = interfaces |> Seq.map (fun x -> ExprInterfaceImpl (ExprVal (ValId x))) |> Seq.toList
+            let interfaces = 
+                bases |> 
+                function 
+                | BaseListSyntax bases -> 
+                    bases |> List.filter (fun b -> baseT |> Option.forall (fun x -> x.Name <> b.ToFullString()))
+                    |> List.map (fun b -> b.ToFullString(), model.GetTypeInfo(b.Type).Type.GetMembers() |> Seq.toList, s.Interfaces |> Seq.toList)
+                | _ -> []
+            let interfaceMembers = interfaces |> Seq.map (fun x -> ExprInterfaceImpl (ExprVal (ValId (sprintf "%A" x)))) |> Seq.toList
             ExprType (TypeId ident.Text,
                 TypeDeclClass (getModifiers node, gs, PatTuple[], (members |> List.collect (getMembers gs)) @ interfaceMembers))
             |> applyAttributes attrs
