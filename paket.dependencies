@@ -1,8 +1,7 @@
-source D:\dev\github\ExtCore\ExtCore.netcore\bin\Debug
 source https://www.nuget.org/api/v2
-framework: netstandard2.0
+framework: netstandard2.0, netcoreapp2.0
 //nuget ExtCore
-github jindraivanek/ExtCore:netcore 
+github jack-pappas/ExtCore
 nuget FAKE
 nuget FSharp.Core
 nuget Microsoft.CodeAnalysis.CSharp
