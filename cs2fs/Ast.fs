@@ -71,11 +71,12 @@ and Expr =
 | ExprFor of Pat * Expr * Expr
 | ExprWhile of cond: Expr * body: Expr
 | ExprDo of Expr // do block
+| ExprWithGeneric of Typ list * Expr
 
 | ExprMember of ValId * Typ list * Modifier list * ValId option * Pat * Expr
 | ExprMemberProperty of Pat * Expr * Expr option
 | ExprMemberPropertyWithSet of Pat * Expr * Expr option * Expr option
-| ExprInterfaceImpl of Expr
+| ExprInterfaceImpl of Typ * Expr
 
 | ExprAttribute of AttributeId list * Expr
 
@@ -177,7 +178,8 @@ module rec Transforms =
         | ExprMember (v, gs, ms, vo, p, e) -> ExprMember(v, gs, ms, vo, pF p, eF e)
         | ExprMemberProperty (p, e, eo) -> ExprMemberProperty (pF p, eF e, Option.map eF eo)
         | ExprMemberPropertyWithSet (p, e, eo, eo2) -> ExprMemberPropertyWithSet (pF p, eF e, Option.map eF eo, Option.map eF eo2)
-        | ExprInterfaceImpl (e) -> ExprInterfaceImpl (eF e)
+        | ExprInterfaceImpl (t,e) -> ExprInterfaceImpl (tF t, eF e)
+        | ExprWithGeneric (g,e) -> ExprWithGeneric (List.map tF g, eF e)
 
         | ExprTypeConversion(t,e) -> ExprTypeConversion(tF t, eF e)
         | ExprArrayInit(t,rs) -> ExprArrayInit(tF t, List.map eF rs)

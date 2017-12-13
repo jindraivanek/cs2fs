@@ -60,7 +60,7 @@ let (|InitializerExpressionSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
 let (|ArrayCreationExpressionSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     match node with
     | :? Microsoft.CodeAnalysis.CSharp.Syntax.ArrayCreationExpressionSyntax as node ->
-      Some (node.Type.ElementType, node.Type.RankSpecifiers |> Seq.toList)
+      Some (node.Type.ElementType, node.Type.RankSpecifiers |> Seq.toList, node.Initializer)
     | _ -> None
 
 let (|ForStatementSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =

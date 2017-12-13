@@ -4,6 +4,7 @@ open Microsoft.CodeAnalysis
 open Microsoft.CodeAnalysis.CSharp
 open cs2fs.AST
 open cs2fs.CSharpActivePatternsExtra
+open Microsoft.CodeAnalysis.CSharp.Syntax
 let sequence xs = xs |> Seq.toList |> ExprSequence
 let (|++|) x y = ExprSequence [x;y]
     
@@ -169,7 +170,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | null 
         | _ -> []
 
-    let getMembers classGenerics (n: SyntaxNode) =
+    let rec getMembers classGenerics (n: SyntaxNode) =
         match n with
         | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,ident,typePars,pars,typeParsConstrs,block,arrowExpr,_) as n -> 
             let gs = getGenerics typePars
@@ -196,9 +197,10 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 else ExprMemberPropertyWithSet (p, e, None, None)
                  |> applyAttributes attrs
             ) |> Seq.toList
+        | ClassDeclarationSyntax _ as n -> [ exprF n ]
         | _ -> failwith <| "GetMembers " + missingCaseTreePrinter n
 
-    let exprF (node: SyntaxNode) =
+    and exprF (node: SyntaxNode) =
         match node with
         | CompilationUnitSyntax(aliases, usings, attrs, members, _) ->
             (usings |> Seq.map descend |> sequence)
@@ -216,16 +218,19 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let baseT = s.BaseType |> Option.ofObj
             let gs = getGenerics typePars
             let interfaces = 
-                bases |> 
-                function 
+                match bases with 
                 | BaseListSyntax bases -> 
                     bases |> List.filter (fun b -> baseT |> Option.forall (fun x -> x.Name <> b.ToFullString()))
-                    |> List.map (fun b -> b.ToFullString(), model.GetTypeInfo(b.Type).Type.GetMembers() |> Seq.toList, s.Interfaces |> Seq.toList)
+                    |> List.map (fun b -> b.ToFullString().Trim())
                 | _ -> []
-            let interfaceMembers = interfaces |> Seq.map (fun x -> ExprInterfaceImpl (ExprVal (ValId (sprintf "%A" x)))) |> Seq.toList
+            let interfaceMembers = 
+                interfaces 
+                |> Seq.map (fun x -> ExprInterfaceImpl (TypType (TypeId (sprintf "%A" x)), ExprVal (ValId "???"))) |> Seq.toList
             ExprType (TypeId ident.Text,
                 TypeDeclClass (getModifiers node, gs, PatTuple[], (members |> List.collect (getMembers gs)) @ interfaceMembers))
             |> applyAttributes attrs
+
+        | MethodDeclarationSyntax _ as n -> ExprType (TypeId "Tmp", TypeDeclClass (getModifiers node, [], PatTuple[], (getMembers [] n)))
         
         | BlockSyntax(_x,stmts,_) -> 
             match stmts with
@@ -250,6 +255,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             | "++" -> withOp "+" "1"
             | "--" -> withOp "-" "1"
             | "!" -> ExprApp(ExprVal(ValId "not"), descend e)
+            | "-" -> ExprApp(ExprVal(ValId "-"), descend e)
             | x -> printfn "Unknown prefix operator: %s" x; misssingCaseExpr n
         | PostfixUnaryExpressionSyntax(e,op) as n ->
             //TODO: correct postfix operator sequence
@@ -296,17 +302,23 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | ConditionalExpressionSyntax(e1, _, e2, _, e3) ->
             ExprIf(descend e1, descend e2, Some (descend e3))
             
+        | ArrayCreationExpressionSyntax(t, rs, InitializerExpressionSyntax([])) -> 
+            ExprArrayInit (getType t, rs |> List.collect (fun r -> r.Sizes |> Seq.map descend |> Seq.toList))
+        | ArrayCreationExpressionSyntax(_, _, InitializerExpressionSyntax(es)) 
+        | ImplicitArrayCreationExpressionSyntax(_,_,_,InitializerExpressionSyntax(es))
         | InitializerExpressionSyntax(es) -> ExprArray(es |> List.map descend)
-        | ArrayCreationExpressionSyntax(t, rs) -> ExprArrayInit (getType t, rs |> List.collect (fun r -> r.Sizes |> Seq.map descend |> Seq.toList))
+        //| OmittedArraySizeExpressionSyntax _ -> ExprVal(ValId "_")
+        
+        | TypeOfExpressionSyntax (_,_,t,_) -> ExprWithGeneric([getType t], ExprVal(ValId "typeof"))
         
         | _ -> misssingCaseExpr node
 
     try
-        if tryImplicitConv then
-            implicitConv node |> Option.map (fun t -> 
-                ExprTypeConversion (t, descendNoImplicit node)) 
-            |> Option.fill (exprF node)
-        else exprF node
+    if tryImplicitConv then
+        implicitConv node |> Option.map (fun t -> 
+            ExprTypeConversion (t, descendNoImplicit node)) 
+        |> Option.fill (exprF node)
+    else exprF node
     with e -> 
         exceptionExpr e node
 
