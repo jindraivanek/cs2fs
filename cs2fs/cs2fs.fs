@@ -221,11 +221,11 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 match bases with 
                 | BaseListSyntax bases -> 
                     bases |> List.filter (fun b -> baseT |> Option.forall (fun x -> x.Name <> b.ToFullString()))
-                    |> List.map (fun b -> b.ToFullString().Trim())
+                    |> List.map (fun b -> fst <| getTypeInfo b.Type)
                 | _ -> []
             let interfaceMembers = 
                 interfaces 
-                |> Seq.map (fun x -> ExprInterfaceImpl (TypType (TypeId (sprintf "%A" x)), ExprVal (ValId "???"))) |> Seq.toList
+                |> Seq.map (fun x -> ExprInterfaceImpl (TypType (TypeId (sprintf "%s" x)), ExprVal (ValId "???"))) |> Seq.toList
             ExprType (TypeId ident.Text,
                 TypeDeclClass (getModifiers node, gs, PatTuple[], (members |> List.collect (getMembers gs)) @ interfaceMembers))
             |> applyAttributes attrs
@@ -302,14 +302,20 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | ConditionalExpressionSyntax(e1, _, e2, _, e3) ->
             ExprIf(descend e1, descend e2, Some (descend e3))
             
-        | ArrayCreationExpressionSyntax(t, rs, InitializerExpressionSyntax([])) -> 
+        | ArrayCreationExpressionSyntax(t, rs, InitializerExpressionSyntax([]))
+        | ArrayCreationExpressionSyntax(t, rs, null) -> 
             ExprArrayInit (getType t, rs |> List.collect (fun r -> r.Sizes |> Seq.map descend |> Seq.toList))
         | ArrayCreationExpressionSyntax(_, _, InitializerExpressionSyntax(es)) 
         | ImplicitArrayCreationExpressionSyntax(_,_,_,InitializerExpressionSyntax(es))
         | InitializerExpressionSyntax(es) -> ExprArray(es |> List.map descend)
         //| OmittedArraySizeExpressionSyntax _ -> ExprVal(ValId "_")
         
+        | PredefinedTypeSyntax tok -> ExprVal(ValId tok.Text)
+        | CastExpressionSyntax(_,t,_,e) -> ExprTypeConversion (getType t, descend e)
         | TypeOfExpressionSyntax (_,_,t,_) -> ExprWithGeneric([getType t], ExprVal(ValId "typeof"))
+
+        // not supported syntax
+        | BreakStatementSyntax _ -> ExprVal(ValId "break")
         
         | _ -> misssingCaseExpr node
 
