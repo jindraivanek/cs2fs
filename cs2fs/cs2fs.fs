@@ -5,6 +5,8 @@ open Microsoft.CodeAnalysis.CSharp
 open cs2fs.AST
 open cs2fs.CSharpActivePatternsExtra
 open Microsoft.CodeAnalysis.CSharp.Syntax
+open Microsoft.CodeAnalysis.CSharp.Syntax
+open Microsoft.CodeAnalysis.CSharp.Syntax
 let sequence xs = xs |> Seq.toList |> ExprSequence
 let (|++|) x y = ExprSequence [x;y]
     
@@ -179,6 +181,13 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                     |> applyAttributes attrs 
             ]
             
+        | ConstructorDeclarationSyntax (attrs,_,pars,init,block,_) ->
+            let gs = []
+            [ 
+                ExprMember (ValId "new", gs, getModifiers n, thisIfNotStatic n, printParamaterList (classGenerics @ gs) pars, descend block) 
+                    |> applyAttributes attrs 
+            ]
+        
         | PropertyDeclarationSyntax(attrs, typ, explicitInterface, ident, AccessorListSyntax(_, accessors, _), arrowExpr, equals, _) ->
             let accs = 
                 accessors |> List.map (fun (AccessorDeclarationSyntax(attrs, keyword, block, _)) ->
@@ -197,6 +206,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 else ExprMemberPropertyWithSet (p, e, None, None)
                  |> applyAttributes attrs
             ) |> Seq.toList
+        
         | ClassDeclarationSyntax _ as n -> [ exprF n ]
         | _ -> failwith <| "GetMembers " + missingCaseTreePrinter n
 
@@ -310,7 +320,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | InitializerExpressionSyntax(es) -> ExprArray(es |> List.map descend)
         //| OmittedArraySizeExpressionSyntax _ -> ExprVal(ValId "_")
         
-        | PredefinedTypeSyntax tok -> ExprVal(ValId tok.Text)
+        | PredefinedTypeSyntax tok
+        | ThisExpressionSyntax tok -> ExprVal(ValId tok.Text)
         | CastExpressionSyntax(_,t,_,e) -> ExprTypeConversion (getType t, descend e)
         | TypeOfExpressionSyntax (_,_,t,_) -> ExprWithGeneric([getType t], ExprVal(ValId "typeof"))
 
@@ -342,8 +353,8 @@ let main argv =
     let expr = tree |> convert |> Program
     let blockExpr = expr |> cs2fs.FSharpOutput.toFs
     let output = blockExpr |> cs2fs.FSharpOutput.printBlock
-    expr |> (printfn "%A")
-    printfn "==========="
+    //expr |> (printfn "%A")
+    //printfn "==========="
     if argv.Length > 1 then
         System.IO.File.WriteAllText(argv.[1], output) 
     output |> (printfn "%s")
