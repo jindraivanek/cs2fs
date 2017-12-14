@@ -5,8 +5,6 @@ open Microsoft.CodeAnalysis.CSharp
 open cs2fs.AST
 open cs2fs.CSharpActivePatternsExtra
 open Microsoft.CodeAnalysis.CSharp.Syntax
-open Microsoft.CodeAnalysis.CSharp.Syntax
-open Microsoft.CodeAnalysis.CSharp.Syntax
 let sequence xs = xs |> Seq.toList |> ExprSequence
 let (|++|) x y = ExprSequence [x;y]
     
@@ -32,6 +30,9 @@ let misssingCaseExpr n = ExprVal (ValId <| sprintf "Missing case: %A %s" n (miss
 let exceptionExpr (e:System.Exception) n = ExprVal (ValId (sprintf "Exception: %A %A %s" e e.StackTrace <| missingCaseTreePrinter n))
 
 let fullName (n: ISymbol) =
+    match n with
+    | null -> ""
+    | _ ->
     let rec f (n: ISymbol) = 
         if n.ContainingNamespace <> null && n.ContainingNamespace.Name <> "" then 
             (f n.ContainingNamespace) + n.ContainingNamespace.Name + "." 
@@ -182,9 +183,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ]
             
         | ConstructorDeclarationSyntax (attrs,_,pars,init,block,_) ->
-            let gs = []
             [ 
-                ExprMember (ValId "new", gs, getModifiers n, thisIfNotStatic n, printParamaterList (classGenerics @ gs) pars, descend block) 
+                ExprMemberConstructor (getModifiers n, printParamaterList classGenerics pars, descend block) 
                     |> applyAttributes attrs 
             ]
         
@@ -311,7 +311,14 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | ElseClauseSyntax(_,e) -> descend e
         | ConditionalExpressionSyntax(e1, _, e2, _, e3) ->
             ExprIf(descend e1, descend e2, Some (descend e3))
-            
+        | TryStatementSyntax (_, body, catches, finallyBody) -> 
+            let getMatch = function
+                | CatchClauseSyntax (_, CatchDeclarationSyntax(_,t,tok,_), filter, block) ->
+                    let exprFilter = match filter with |CatchFilterClauseSyntax(_,_,x,_) -> Some x |_ -> None
+                    let ident = let x = tok.ValueText in if String.isNullOrEmpty x then "_" else x
+                    ValId ident |> PatBind |> getTypePat (set[]) t, exprFilter |> Option.map descend, descend block
+            ExprTry(descend body, catches |> List.map getMatch, finallyBody |> Option.ofNull |> Option.map descend)
+        | FinallyClauseSyntax (_,body) -> descend body
         | ArrayCreationExpressionSyntax(t, rs, InitializerExpressionSyntax([]))
         | ArrayCreationExpressionSyntax(t, rs, null) -> 
             ExprArrayInit (getType t, rs |> List.collect (fun r -> r.Sizes |> Seq.map descend |> Seq.toList))

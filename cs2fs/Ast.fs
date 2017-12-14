@@ -72,8 +72,10 @@ and Expr =
 | ExprWhile of cond: Expr * body: Expr
 | ExprDo of Expr // do block
 | ExprWithGeneric of Typ list * Expr
+| ExprTry of Expr * Match list * Expr option // try body, with matches, finally body
 
 | ExprMember of ValId * Typ list * Modifier list * ValId option * Pat * Expr
+| ExprMemberConstructor of Modifier list * Pat * Expr
 | ExprMemberProperty of Pat * Expr * Expr option
 | ExprMemberPropertyWithSet of Pat * Expr * Expr option * Expr option
 | ExprInterfaceImpl of Typ * Expr
@@ -176,10 +178,12 @@ module rec Transforms =
         | ExprDo e -> ExprDo (eF e)
         | ExprAttribute (a,e) -> ExprAttribute (a, eF e)
         | ExprMember (v, gs, ms, vo, p, e) -> ExprMember(v, gs, ms, vo, pF p, eF e)
+        | ExprMemberConstructor (ms, p, e) -> ExprMemberConstructor(ms, pF p, eF e)
         | ExprMemberProperty (p, e, eo) -> ExprMemberProperty (pF p, eF e, Option.map eF eo)
         | ExprMemberPropertyWithSet (p, e, eo, eo2) -> ExprMemberPropertyWithSet (pF p, eF e, Option.map eF eo, Option.map eF eo2)
         | ExprInterfaceImpl (t,e) -> ExprInterfaceImpl (tF t, eF e)
         | ExprWithGeneric (g,e) -> ExprWithGeneric (List.map tF g, eF e)
+        | ExprTry (e, m, ef) -> ExprTry (eF e, (m |> List.map (fun (p, eo, e) -> pF p, Option.map eF eo, eF e)), Option.map eF ef)
 
         | ExprTypeConversion(t,e) -> ExprTypeConversion(tF t, eF e)
         | ExprArrayInit(t,rs) -> ExprArrayInit(tF t, List.map eF rs)

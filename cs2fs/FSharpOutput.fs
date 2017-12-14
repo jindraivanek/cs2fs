@@ -67,6 +67,8 @@ let delimLineText sep xs = xs |> Seq.toList |> intersperse (Line |++| Text sep) 
 let surroundText head tail body = Text head |++| body |++| Text tail
 let delimSurroundText sep head tail xs = xs |> (delimText sep >> surroundText head tail)
 
+let opt o f = Option.map f o |> Option.fill (Text "")
+
 let singleLiner b =
     function
     | Line -> Text "; "
@@ -152,6 +154,9 @@ and getMember x =
         getModifiersOfGroup 1 modifiers |++| Text "member " |++| getModifiersOfGroup 2 modifiers 
         |++| (thisVal |> Option.map (fun (ValId x) -> Text(x + ".")) |> Option.fill (Text "")) |++| Text v
         |++| getGenerics generics |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
+    | ExprMemberConstructor (modifiers, args, expr) -> 
+        getModifiersOfGroup 1 modifiers |++| getModifiersOfGroup 2 modifiers |++| Text "new"
+        |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
     | ExprMemberProperty (pat, init, getter) -> property pat init getter (false, None)
     | ExprMemberPropertyWithSet (pat, init, getter, setter) -> property pat init getter (true, setter)
     | ExprInterfaceImpl (t, e) -> Text "interface " |++| getTyp t |++| Text " with" |++| Line |+>| getExpr e
@@ -210,12 +215,16 @@ and getExpr =
     | ExprInclude (ModuleId m) -> Text "open " |++| Text m
     | ExprIf (cond, thenExpr, elseExprMaybe) ->
         Text "if " |++| getExpr cond |++| LineText "then" |++| indentLineBlock (getExpr thenExpr)
-        |++| (elseExprMaybe |> Option.map (fun e -> LineText "else" |++| indentLineBlock (getExpr e)) |> Option.fill (Text ""))
+        |++| opt elseExprMaybe (fun e -> LineText "else" |++| indentLineBlock (getExpr e))
     | ExprFor (pat, collection, expr) ->
         Text "for " |++| getPat pat |++| Text " in " |++| getExpr collection |++| Text " do" |++| indentLineBlock (getExpr expr)
     | ExprWhile (cond, expr) ->
         Text "while " |++| getExprIndentWithParIfSeq cond |++| Text " do" |++| indentLineBlock (getExpr expr)
-    | ExprDo expr -> Text "do " |++| indentLineBlock (getExpr expr)  
+    | ExprDo expr -> Text "do " |++| indentLineBlock (getExpr expr)
+    | ExprTry (expr, catches, finallyMaybe) ->
+        Text "try" |++| indentLineBlock (getExpr expr)
+        |++| Line |++| Text "with" |++| indentLineBlock (catches |> Seq.map (fun m -> getMatch m) |> delimLineText "| ")
+        |++| opt finallyMaybe (fun e -> Line |++| Text "finally" |++| indentLineBlock (getExpr e))
     | ExprSequence es -> 
         es |> Seq.map getExpr |> delimLineText ""
     | ExprAttribute (attrs, e) ->
