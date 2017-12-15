@@ -56,7 +56,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         
     let getType (n:Syntax.TypeSyntax) =  
         match n with
-        | :? Syntax.IdentifierNameSyntax as x -> x.Identifier.Text |> TypeId |> TypType
+        | :? Syntax.IdentifierNameSyntax as x -> x.Identifier.Text.Trim() |> TypeId |> TypType
         | _ ->
             let (t, gs) = getTypeInfo n
             gs |> Option.map (fun g -> TypWithGeneric(g, TypType (TypeId t))) |> Option.fill (TypType (TypeId t))
@@ -71,9 +71,9 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
     let getTypePat genericSet (n:Syntax.TypeSyntax) pat = getTypeAbbr genericSet n PatWithType pat
     let getExprWithType genericSet (n:Syntax.TypeSyntax) e = getTypeAbbr genericSet n ExprWithType e
     
-    let getParameterSyntax generics (ParameterSyntax(attrs, typ, ident, _)) = 
+    let getParameterSyntax generics (ParameterSyntax(attrs, typ, SyntaxToken ident, _)) = 
         let genericSet = generics |> Seq.choose (function | TypGeneric (GenericId g) -> Some g | _ -> None) |> set
-        ident.Text |> ValId |> PatBind |> getTypePat genericSet typ
+        ident |> ValId |> PatBind |> getTypePat genericSet typ
     
     let printParamaterList generics = 
         function
@@ -162,23 +162,23 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | VariableDeclarationSyntax(typ, vars) ->
             vars |> Seq.map
                 (function
-                 | VariableDeclaratorSyntax(ident, args, init) -> 
-                     ValId ident.Text |> PatBind |> getTypePat (set[]) typ, descendOption init (defInit typ))
+                 | VariableDeclaratorSyntax(SyntaxToken ident, args, init) -> 
+                     ValId ident |> PatBind |> getTypePat (set[]) typ, descendOption init (defInit typ))
         | _ -> seq [PatConst(ConstId "getVariableDeclarators"), misssingCaseExpr n] //<| "getVariableDeclarators " + missingCaseTreePrinter n
     
     let getGenerics p =
         match p with
         | TypeParameterListSyntax(_, l, _) ->
-            l |> List.map (fun t -> GenericId t.Identifier.Text |> TypGeneric)
+            l |> List.map (fun t -> GenericId (t.Identifier.Text.Trim()) |> TypGeneric)
         | null 
         | _ -> []
 
     let rec getMembers classGenerics (n: SyntaxNode) =
         match n with
-        | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,ident,typePars,pars,typeParsConstrs,block,arrowExpr,_) as n -> 
+        | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,SyntaxToken ident,typePars,pars,typeParsConstrs,block,arrowExpr,_) as n -> 
             let gs = getGenerics typePars
             [ 
-                ExprMember (ValId ident.Text, gs, getModifiers n, thisIfNotStatic n, printParamaterList (classGenerics @ gs) pars, descend block) 
+                ExprMember (ValId ident, gs, getModifiers n, thisIfNotStatic n, printParamaterList (classGenerics @ gs) pars, descend block) 
                     |> applyAttributes attrs 
             ]
             
@@ -188,11 +188,11 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                     |> applyAttributes attrs 
             ]
         
-        | PropertyDeclarationSyntax(attrs, typ, explicitInterface, ident, AccessorListSyntax(_, accessors, _), arrowExpr, equals, _) ->
+        | PropertyDeclarationSyntax(attrs, typ, explicitInterface, SyntaxToken ident, AccessorListSyntax(_, accessors, _), arrowExpr, equals, _) ->
             let accs = 
-                accessors |> List.map (fun (AccessorDeclarationSyntax(attrs, keyword, block, _)) ->
-                    keyword.Text, Option.ofObj block)
-            let (propPat, init) = ValId ident.Text |> PatBind |> getTypePat (set[]) typ, defInit typ
+                accessors |> List.map (fun (AccessorDeclarationSyntax(attrs, SyntaxToken keyword, block, _)) ->
+                    keyword, Option.ofObj block)
+            let (propPat, init) = ValId ident |> PatBind |> getTypePat (set[]) typ, defInit typ
             match accs with
             | [] -> []
             | ["get", getBlock] -> [ExprMemberProperty (propPat, init, descendToOption getBlock) |> applyAttributes attrs]
@@ -222,7 +222,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ExprNamespace <| (NamespaceId <| name.ToString(),
                 ((usings |> Seq.map descend |> sequence)
                 |++| (members |> Seq.map descend |> sequence)))
-        | ClassDeclarationSyntax(attrs,keyword,ident,typePars, bases,constrs,_,members,_,_) as n ->
+        | ClassDeclarationSyntax(attrs,keyword,SyntaxToken ident,typePars, bases,constrs,_,members,_,_) as n ->
             let c = n :?> Syntax.ClassDeclarationSyntax
             let s = model.GetDeclaredSymbol(c)
             let baseT = s.BaseType |> Option.ofObj
@@ -236,7 +236,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let interfaceMembers = 
                 interfaces 
                 |> Seq.map (fun x -> ExprInterfaceImpl (TypType (TypeId (sprintf "%s" x)), ExprVal (ValId "???"))) |> Seq.toList
-            ExprType (TypeId ident.Text,
+            ExprType (TypeId ident,
                 TypeDeclClass (getModifiers node, gs, PatTuple[], (members |> List.collect (getMembers gs)) @ interfaceMembers))
             |> applyAttributes attrs
 
@@ -250,37 +250,37 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | SimpleLambdaExpressionSyntax(_, par, _, e) -> ExprLambda([getParameterSyntax [] par], descend e)
         | ParenthesizedLambdaExpressionSyntax(_, pars, _, e) -> ExprLambda([printParamaterList [] pars], descend e)
         | InvocationExpressionSyntax(e, args) -> ExprApp (descend e, printArgumentList args)
-        | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, ExprVal (ValId <| name.ToFullString()))
+        | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, ExprVal (ValId <| name.ToFullString().Trim()))
         | ElementAccessExpressionSyntax(e, args) -> ExprItemApp (descend e, printArgumentList args)
-        | BinaryExpressionSyntax(e1,op,e2) -> ExprInfixApp (descend e1, ValId (operatorRewrite op.Text), descend e2)
-        | AssignmentExpressionSyntax(e1,op,e2) -> 
+        | BinaryExpressionSyntax(e1,SyntaxToken op,e2) -> ExprInfixApp (descend e1, ValId (operatorRewrite op), descend e2)
+        | AssignmentExpressionSyntax(e1,SyntaxToken op,e2) -> 
             let withOp o = ExprInfixApp (descend e1, ValId "<-", ExprInfixApp (descend e1, ValId o, descend e2)) 
-            match op.Text with
+            match op with
             | "=" -> ExprInfixApp (descend e1, ValId "<-", descend e2)
             | "+=" -> withOp "+" 
             | "-=" -> withOp "-" 
-        | PrefixUnaryExpressionSyntax(op,e) as n ->
+        | PrefixUnaryExpressionSyntax(SyntaxToken op,e) as n ->
             let withOp o c = [ExprInfixApp (descend e, ValId "<-", ExprInfixApp (descend e, ValId o, ExprConst (ConstId c))); descend e] |> sequence
-            match op.Text with
+            match op with
             | "++" -> withOp "+" "1"
             | "--" -> withOp "-" "1"
             | "!" -> ExprApp(ExprVal(ValId "not"), descend e)
             | "-" -> ExprApp(ExprVal(ValId "-"), descend e)
             | x -> printfn "Unknown prefix operator: %s" x; misssingCaseExpr n
-        | PostfixUnaryExpressionSyntax(e,op) as n ->
+        | PostfixUnaryExpressionSyntax(e,SyntaxToken op) as n ->
             //TODO: correct postfix operator sequence
             let withOp o c = [ExprInfixApp (descend e, ValId "<-", ExprInfixApp (descend e, ValId o, ExprConst (ConstId c))); descend e] |> sequence
-            match op.Text with
+            match op with
             | "++" -> withOp "+" "1"
             | "--" -> withOp "-" "1"
             | x -> printfn "Unknown postfix operator: %s" x; misssingCaseExpr n
             
-        | IdentifierNameSyntax(token) as n -> 
+        | IdentifierNameSyntax(SyntaxToken text) as n -> 
             let identInfo = model.GetSymbolInfo (n:SyntaxNode)
-            let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text)
-            let isThis = Option.attempt (fun () -> identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(token.Text.StartsWith("this."))) |> Option.fill false
-            ExprVal <| (ValId <| (if isThis then "this." else "") +  token.Text)
-        | LiteralExpressionSyntax(token) as n -> ExprConst <| ConstId (token.Text)
+            let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text.Trim())
+            let isThis = Option.attempt (fun () -> identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(text.StartsWith("this."))) |> Option.fill false
+            ExprVal <| (ValId <| (if isThis then "this." else "") +  text)
+        | LiteralExpressionSyntax(SyntaxToken text) -> ExprConst <| ConstId text
         | ExpressionStatementSyntax(_,expr,_) -> descend expr
         | ObjectCreationExpressionSyntax(_, typ, args, init) -> 
             ExprNew (getType typ, printArgumentList args)
@@ -298,8 +298,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             |> (fun e -> ExprBind ([], PatBind(ValId "__"), [e; descend stmt] |> sequence))
         | WhileStatementSyntax(_, _, e, _, stmt) ->
             ExprWhile (descend e, descend stmt)
-        | ForEachStatementSyntax(_, _, typ, ident, _, e, _, stmt) ->
-            ExprFor (ValId ident.Text |> PatBind |> getTypePat (set[]) typ, descend e, descend stmt)
+        | ForEachStatementSyntax(_, _, typ, SyntaxToken ident, _, e, _, stmt) ->
+            ExprFor (ValId ident |> PatBind |> getTypePat (set[]) typ, descend e, descend stmt)
         | ForStatementSyntax(varDecl, initActions, cond, postActions, stmt) ->
             let binds = varDecl |> Option.ofObj |> Option.map getVariableDeclarators 
             let bindsExpr = binds |> Option.map (Seq.map (fun (p,e) -> ExprBind(getMutableModifier varDecl, p, e)) >> Seq.toList) |> Option.fill []
@@ -327,8 +327,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | InitializerExpressionSyntax(es) -> ExprArray(es |> List.map descend)
         //| OmittedArraySizeExpressionSyntax _ -> ExprVal(ValId "_")
         
-        | PredefinedTypeSyntax tok
-        | ThisExpressionSyntax tok -> ExprVal(ValId tok.Text)
+        | PredefinedTypeSyntax (SyntaxToken tok)
+        | ThisExpressionSyntax (SyntaxToken tok) -> ExprVal(ValId tok)
         | CastExpressionSyntax(_,t,_,e) -> ExprTypeConversion (getType t, descend e)
         | TypeOfExpressionSyntax (_,_,t,_) -> ExprWithGeneric([getType t], ExprVal(ValId "typeof"))
 

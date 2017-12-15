@@ -3,6 +3,9 @@ module cs2fs.CSharpActivePatternsExtra
 open Microsoft.CodeAnalysis
 open Microsoft.CodeAnalysis.CSharp
 
+let (|SyntaxToken|) (tok: Microsoft.CodeAnalysis.SyntaxToken) =
+    tok.ValueText.Trim()
+
 let (|VariableDeclarationSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     match node with
     | :? Microsoft.CodeAnalysis.CSharp.Syntax.VariableDeclarationSyntax as node ->
