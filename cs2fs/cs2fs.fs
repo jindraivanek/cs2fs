@@ -152,7 +152,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         typ
 
     let getAttributes attrs =
-        attrs |> Seq.collect (fun (a: Syntax.AttributeListSyntax) -> a.Attributes |> Seq.map (fun x -> AttributeId <| x.Name.ToFullString())) |> Seq.toList
+        attrs |> Seq.collect (fun (a: Syntax.AttributeListSyntax) -> a.Attributes |> Seq.map (fun x -> AttributeId <| x.Name.ToFullString().Trim())) |> Seq.toList
         |> Option.conditional (List.isEmpty attrs |> not)
     let applyAttributes attrs e =
         getAttributes attrs |> Option.map (fun a -> ExprAttribute (a, e)) |> Option.fill e
@@ -217,7 +217,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             |++| (members |> Seq.map descend |> sequence)
             |> applyAttributes attrs
         | UsingDirectiveSyntax(_, staticKeyword, alias, name, _) ->
-            Expr.ExprInclude (ModuleId <| name.ToFullString())
+            Expr.ExprInclude (ModuleId <| name.ToFullString().Trim())
         | NamespaceDeclarationSyntax(keyword, name, _, externs, usings, members, _, _) ->
             ExprNamespace <| (NamespaceId <| name.ToString(),
                 ((usings |> Seq.map descend |> sequence)
@@ -230,7 +230,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let interfaces = 
                 match bases with 
                 | BaseListSyntax bases -> 
-                    bases |> List.filter (fun b -> baseT |> Option.forall (fun x -> x.Name <> b.ToFullString()))
+                    bases |> List.filter (fun b -> baseT |> Option.forall (fun x -> x.Name <> b.ToFullString().Trim()))
                     |> List.map (fun b -> fst <| getTypeInfo b.Type)
                 | _ -> []
             let interfaceMembers = 
