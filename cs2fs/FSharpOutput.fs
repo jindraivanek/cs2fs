@@ -15,6 +15,7 @@ type Block =
     | Text of string
     | Line
     | IndentBlock of Block
+    | Paren of Block
     | Block of Block list
 
 let rec mapBlock f =
@@ -30,14 +31,38 @@ let printBlock block =
         | Text s -> s
         | Line -> nl
         | _ -> ""
+    let rec simplify = function
+        | Block [Paren b] -> Paren (Block [b]) |> simplify
+        | Block (Block b :: rest) -> Block (b @ rest) |> simplify
+        | Block bs -> 
+            let rec simplifyList = function
+                | Text "" :: rest -> simplifyList rest
+                | Block [] :: rest -> simplifyList rest
+                | Block b1 :: Block b2 :: rest -> Block (b1 @ b2) :: simplifyList rest
+                | Line :: Paren b :: Line :: rest -> Line :: b :: Line :: simplifyList rest
+                | b :: rest -> b :: simplifyList rest
+                | [] -> []
+            let bs' = bs |> simplifyList |> List.map simplify 
+            if List.length bs <> List.length bs' then bs' |> Block |> simplify  else bs' |> Block 
+        | Paren (Paren b) 
+        | Paren b -> b |> simplify |> Paren 
+        | IndentBlock b -> simplify b |> IndentBlock
+        | x -> x
+    let parenStart = Text "("
+    let parenEnd = Text ")"
     let rec f indent =
         function
+        | Text ""
+        | Block [] -> []
         | Text s -> [indent, Text s]
         | Line -> [indent, Line]
         | Block (b::bs) -> f indent b @ f indent (Block bs)
-        | Block [] -> []
         | IndentBlock b -> f (indent + 1) b
-    f 0 block 
+        | Paren b -> f indent (Block [parenStart; b; parenEnd])
+
+    let simplified = block |> simplify
+    let simplified = simplified |> f 0
+    simplified
     |> Seq.fold (fun (acc,lineBegin) (indent, b) -> 
         acc + (if lineBegin then printIndent indent else "") + print b, match b with |Line -> true |_->false) ("",false)
     |> fst  
@@ -75,6 +100,10 @@ let singleLiner b =
     | x -> x
     |> (fun f -> mapBlock f b)
 
+let removeTopParen = function
+    | Paren x -> x
+    | x -> x
+
 let getModifier =
     function
     | Private -> Text "private"
@@ -99,8 +128,8 @@ let rec getTyp =
     | TypType (TypeId x) -> Text x
     | TypGeneric (GenericId x) -> Text ("'" + x)
     | TypWithGeneric(gs, x) -> getTyp x |++| getGenerics gs 
-    | TypFun(t1, t2) -> [t1; t2] |> Seq.map getTyp |> delimText " -> " |> surroundText "(" ")"
-    | TypTuple(ts) -> ts |> Seq.map getTyp |> delimText " * " |> surroundText "(" ")"
+    | TypFun(t1, t2) -> [t1; t2] |> Seq.map getTyp |> delimText " -> " |> Paren
+    | TypTuple(ts) -> ts |> Seq.map getTyp |> delimText " * " |> Paren
 
 and getGenerics gs = 
     if Seq.isEmpty gs then Text ""
@@ -113,8 +142,8 @@ let rec getPat =
     | PatWildcard -> Text "_"
     | PatBind (ValId v) -> Text v
     | PatCons (ValId v, ps) -> Text (v + " ") |++| (ps |> Seq.map getPat |> delimText " ")
-    | PatInfixCons (p1, (ValId v), p2) -> [getPat p1; Text v; getPat p2] |> delimText " " |> surroundText "(" ")"
-    | PatTuple ts -> ts |> List.map getPat |> delimSurroundText ", " "(" ")" 
+    | PatInfixCons (p1, (ValId v), p2) -> [getPat p1; Text v; getPat p2] |> delimText " " |> Paren
+    | PatTuple ts -> ts |> List.map getPat |> delimText ", " |> Paren
     | PatList ts -> ts |> List.map getPat |> delimSurroundText "; " "[" "]" 
     | PatRecord rows -> rows |> Seq.map (fun (FieldId f, p) -> Text (f + " = ") |++| getPat p) |> delimText "; " |> surroundText "{" "}" 
     | PatWithType (t, p) -> [getPat p; getTyp t] |> delimText " : "
@@ -129,7 +158,7 @@ let rec getDecl =
     function
     | TypeDeclRecord rows -> rows |> Seq.map (fun (FieldId f, t) -> Text (f + " : ") |++| getDecl t) |> delimText "; " |> surroundText "{" "}"
     | TypeDeclUnion rows -> rows |> Seq.map (fun (ValId v, t) -> Text v |++| (t |> Option.map (fun x -> Text " of " |++| getDecl x) |> Option.fill (Text ""))) |> delimText " | "
-    | TypeDeclTuple ts -> ts |> Seq.map getDecl |> delimText " * " |> surroundText "(" ")"
+    | TypeDeclTuple ts -> ts |> Seq.map getDecl |> delimText " * " |> Paren
     | TypeDeclId (TypeId p) -> Text p
     | TypeDeclClass (modifiers, generics, p, members) -> getModifiers modifiers |++| getPat p
 
@@ -170,18 +199,18 @@ and getBind header modifiers isRec isFirstRec (p, e) =
     | true, true -> Text (header + " rec ")
     | true, false -> Text "and "
     | _ -> Text (header + " ") 
-    |++| getModifiers modifiers |++| getPat p |++| Text " = " |++| Line |+>| getExpr e
+    |++| getModifiers modifiers |++| getPat p |++| Text " = " |++| Line |+>| (getExpr e |> removeTopParen)
 
 and getExpr =
     function
     | ExprConst (ConstId c) -> Text c
     | ExprVal (ValId v) -> Text v
-    | ExprApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText " " |> surroundText "(" ")"
-    | ExprDotApp ((ExprConst _) as e1, e2) -> [getExpr e1 |> surroundText "(" ")"; getExpr e2] |> delimText "."
+    | ExprApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText " " |> Paren
+    | ExprDotApp ((ExprConst _) as e1, e2) -> [getExpr e1 |> Paren; getExpr e2] |> delimText "."
     | ExprDotApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText "."
     | ExprItemApp (e1, e2) -> [getExpr e1; surroundText "[" "]" (e2 |> getExpr)] |> delimText "."
-    | ExprInfixApp (e1, ValId v, e2) -> [singleLiner (getExpr e1); Text v; singleLiner (getExpr e2)] |> delimText " " |> surroundText "(" ")"
-    | ExprTuple ts -> ts |> List.map getExpr |> delimSurroundText ", " "(" ")"
+    | ExprInfixApp (e1, ValId v, e2) -> [singleLiner (getExpr e1); Text v; singleLiner (getExpr e2)] |> delimText " " |> Paren
+    | ExprTuple ts -> ts |> List.map getExpr |> delimText ", " |> Paren
     | ExprList ts -> ts |> List.map getExpr |> delimSurroundText "; " "[" "]"
     | ExprArray ts -> ts |> List.map getExpr |> delimSurroundText "; " "[|" "|]"
     | ExprRecord (copyE, rows) -> 
@@ -202,7 +231,7 @@ and getExpr =
         Text "function"
         |++| Line |++| (rows |> Seq.map (fun m -> getMatch m) |> delimLineText "| ")
     | ExprLambda (args, e) -> 
-        Text "fun " |++| (args |> Seq.map getPat |> delimText " ") |++| Text " -> " |++| getExpr e |> surroundText "(" ")"
+        Text "fun " |++| (args |> Seq.map getPat |> delimText " ") |++| Text " -> " |++| getExpr e |> Paren
     | ExprWithType (t, e) -> getExpr e |++| Text " : " |++| getTyp t
     | ExprModule (ModuleId m, e) -> Text "module " |++| Text m |++| Text " =" |++| Line |+>| getExpr e
     | ExprNamespace (NamespaceId m, e) -> Text "namespace " |++| Text m |++| Line |++| getExpr e
@@ -226,7 +255,7 @@ and getExpr =
         |++| Line |++| Text "with" |++| indentLineBlock (catches |> Seq.map (fun m -> getMatch m) |> delimLineText "| ")
         |++| opt finallyMaybe (fun e -> Line |++| Text "finally" |++| indentLineBlock (getExpr e))
     | ExprSequence es -> 
-        es |> Seq.map getExpr |> delimLineText ""
+        es |> Seq.map getExpr |> Seq.map removeTopParen |> delimLineText ""
     | ExprAttribute (attrs, e) ->
         attrs |> List.map (fun (AttributeId x) -> Text x) |> delimSurroundText "; " "[<" ">]" |++| Line
         |++| getExpr e
@@ -234,7 +263,7 @@ and getExpr =
         getExpr e |++| (g |> List.map getTyp |> delimSurroundText ", " "<" ">")
       
     | ExprTypeConversion (t, e) -> 
-        let def = (surroundText "(" ")" <| getExpr e) |++| Text " :> " |++| (getTyp t)
+        let def = (Paren <| getExpr e) |++| Text " :> " |++| (getTyp t)
         match t with
         | TypType (TypeId tt) ->
             match tt with
@@ -242,7 +271,7 @@ and getExpr =
             | "int" -> Text (tt + " ") |++| getExpr e
             | _ -> def
         | _ -> def
-        |> surroundText "(" ")"
+        |> Paren
     | ExprArrayInit (t, ranks) ->
         let n = List.length ranks
         let arrayModule =
@@ -258,7 +287,11 @@ and getExprIndentIfSeq e =
     match e with
     | ExprSequence (_::_::_) -> getExpr e |> indentLineBlock
     | _ -> getExpr e
-and getExprIndentWithParIfSeq e = getExprIndentIfSeq e |> surroundText "(" ")"
+and getExprIndentWithParIfSeq e = 
+    match e with
+    | ExprSequence (_::_::_) -> getExpr e |> indentLineBlock |> Paren
+    | _ -> getExpr e
+
 
 let toFs (Program e) =
     e 
