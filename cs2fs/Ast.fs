@@ -84,6 +84,7 @@ and Expr =
 
 | ExprTypeConversion of Typ * Expr
 | ExprArrayInit of Typ * Expr list // array type, array sizes
+| ExprReturn of Expr
 
 and Match = Pat * Expr option * Expr
 
@@ -103,14 +104,6 @@ type ASTmapF = {
         TypeDeclF = fun _ -> None
         RecurseIntoChanged = true
     }
-
-let rec simplify =
-    function
-    | ExprSequence es -> 
-        es |> List.collect (function | ExprSequence es2 -> es2 | e -> [e])
-        |> List.map simplify
-        |> ExprSequence
-    | e -> e
 
 let constIsString (ConstId c) = String.startsWith "\"" c && String.endsWith "\"" c
 
@@ -187,6 +180,7 @@ module rec Transforms =
 
         | ExprTypeConversion(t,e) -> ExprTypeConversion(tF t, eF e)
         | ExprArrayInit(t,rs) -> ExprArrayInit(tF t, List.map eF rs)
+        | ExprReturn e -> ExprReturn (eF e)
 
     let transformPat astF n = 
         let (eF, tF, pF, dF) = recFuncs astF
@@ -243,6 +237,17 @@ module rec Transforms =
             | ExprModule _ -> program
             | _ -> ExprNamespace (NamespaceId "global", program)
         | e -> e
+    
+    let rec simplify =
+        function
+        | ExprSequence [e] -> Some e
+        | ExprSequence es -> 
+            es |> List.collect (function | ExprSequence es2 -> es2 | e -> [e])
+            |> List.map simplify
+            |> ExprSequence
+            |> Some
+        | _ -> None
+        |> exprMap
 
     let assignmentAsExpr =
         function
@@ -281,7 +286,25 @@ module rec Transforms =
             Some <| ExprMember (v,t,m,v2,p,e')
         | _ -> None
         |> exprMapOnce
-        
+
+    let lastReturn =
+        function
+        | ExprIf (_, ExprReturn _, None) -> None
+        | ExprSequence es ->
+            match List.tryLast es with
+            | Some (ExprReturn e) -> Some e
+            | _ -> None
+        | ExprReturn e -> Some e
+        | _ -> None
+        |> exprMapOnce
+
+    let removeUnnecessaryTypeConversion =
+        function
+        | ExprBind (modifiers, (PatWithType(t,_) as p), ExprTypeConversion(t2, e)) when t=t2 ->
+            ExprBind (modifiers, p, e) |> Some
+        | _ -> None
+        |> exprMap
+    
     let typeReplecement =
         function
         | TypWithGeneric(gs, TypType (TypeId "System.Func")) -> 

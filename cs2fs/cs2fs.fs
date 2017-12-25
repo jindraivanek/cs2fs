@@ -75,14 +75,14 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         let genericSet = generics |> Seq.choose (function | TypGeneric (GenericId g) -> Some g | _ -> None) |> set
         ident |> ValId |> PatBind |> getTypePat genericSet typ
     
-    let printParamaterList generics = 
-        function
-        | null -> PatTuple [] 
+    let getParameters = function
         | ParameterListSyntax(_, prms, _) ->
-            let prms = 
-                if isNull prms then [] else 
-                prms |> List.map (getParameterSyntax generics) 
-            prms |> PatTuple
+            if isNull prms then [] else prms
+        | _ -> [] 
+
+    let printParamaterList generics ps = 
+        getParameters ps |> List.map (getParameterSyntax generics) 
+        |> PatTuple
     
     let printArgumentList =
         function
@@ -183,6 +183,9 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ]
             
         | ConstructorDeclarationSyntax (attrs,_,pars,init,block,_) ->
+            match getParameters pars with
+            | [] -> []
+            | _ ->
             [ 
                 ExprMemberConstructor (getModifiers n, printParamaterList classGenerics pars, descend block) 
                     |> applyAttributes attrs 
@@ -246,7 +249,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             match stmts with
             | [] -> ExprVal (ValId "()")
             | _ -> stmts |> Seq.map descend |> sequence
-        | ReturnStatementSyntax(_,e,_) -> descend e
+        | ReturnStatementSyntax(_,e,_) -> descend e |> ExprReturn
         | SimpleLambdaExpressionSyntax(_, par, _, e) -> ExprLambda([getParameterSyntax [] par], descend e)
         | ParenthesizedLambdaExpressionSyntax(_, pars, _, e) -> ExprLambda([printParamaterList [] pars], descend e)
         | InvocationExpressionSyntax(e, args) -> ExprApp (descend e, printArgumentList args)
@@ -315,8 +318,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let getMatch = function
                 | CatchClauseSyntax (_, CatchDeclarationSyntax(_,t,tok,_), filter, block) ->
                     let exprFilter = match filter with |CatchFilterClauseSyntax(_,_,x,_) -> Some x |_ -> None
-                    let ident = let x = tok.ValueText in if String.isNullOrEmpty x then "_" else x
-                    ValId ident |> PatBind |> getTypePat (set[]) t, exprFilter |> Option.map descend, descend block
+                    let ident = let x = tok.ValueText in if String.isNullOrEmpty x then PatWildcard else ValId x |> PatBind
+                    ident |> getTypePat (set[]) t, exprFilter |> Option.map descend, descend block
             ExprTry(descend body, catches |> List.map getMatch, finallyBody |> Option.ofNull |> Option.map descend)
         | FinallyClauseSyntax (_,body) -> descend body
         | ArrayCreationExpressionSyntax(t, rs, InitializerExpressionSyntax([]))

@@ -146,6 +146,7 @@ let rec getPat =
     | PatTuple ts -> ts |> List.map getPat |> delimText ", " |> Paren
     | PatList ts -> ts |> List.map getPat |> delimSurroundText "; " "[" "]" 
     | PatRecord rows -> rows |> Seq.map (fun (FieldId f, p) -> Text (f + " = ") |++| getPat p) |> delimText "; " |> surroundText "{" "}" 
+    | PatWithType (t, PatWildcard) -> Text ":? " |++| getTyp t
     | PatWithType (t, p) -> [getPat p; getTyp t] |> delimText " : "
     | PatBindAs (ValId v, p) -> [getPat p;  Text v] |> delimText " as "
 
@@ -167,7 +168,7 @@ let rec getMatch (p, whenE, e) =
     let whenClause = whenE |> Option.map (fun x -> Text " when " |++| getExpr x) |> Option.fill (Text "")
     [getPat p |++| whenClause; getExpr e] |> delimText " -> "
 
-and getMember x =
+and getMember className x =
     let property pat init getter (haveSetter, setter) =
         let isAutoProperty = Option.isNone getter && (haveSetter = false || Option.isNone setter)
         let header = Text (if isAutoProperty then  "member val " else "member this.") |++| getPatNoType pat |++| (if isAutoProperty then Text " = " |++| getExpr init else Text "")
@@ -184,14 +185,15 @@ and getMember x =
         |++| (thisVal |> Option.map (fun (ValId x) -> Text(x + ".")) |> Option.fill (Text "")) |++| Text v
         |++| getGenerics generics |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
     | ExprMemberConstructor (modifiers, args, expr) -> 
+        let init = ExprBind ([], PatBind (ValId "this"), ExprApp (ExprVal (ValId className), ExprTuple []))
         getModifiersOfGroup 1 modifiers |++| getModifiersOfGroup 2 modifiers |++| Text "new"
-        |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
+        |++| getPat args |++| Text " = " |++| Line |+>| getExpr (ExprSequence [init; expr; ExprVal (ValId "this")])
     | ExprMemberProperty (pat, init, getter) -> property pat init getter (false, None)
     | ExprMemberPropertyWithSet (pat, init, getter, setter) -> property pat init getter (true, setter)
     | ExprInterfaceImpl (t, e) -> Text "interface " |++| getTyp t |++| Text " with" |++| Line |+>| getExpr e
     | ExprAttribute (attrs, e) -> 
         attrs |> List.map (fun (AttributeId x) -> Text x) |> delimSurroundText "; " "[<" ">]" |++| Line
-        |++| getMember e
+        |++| getMember className e
     | ExprType _ -> getExpr x
 
 and getBind header modifiers isRec isFirstRec (p, e) =
@@ -199,7 +201,7 @@ and getBind header modifiers isRec isFirstRec (p, e) =
     | true, true -> Text (header + " rec ")
     | true, false -> Text "and "
     | _ -> Text (header + " ") 
-    |++| getModifiers modifiers |++| getPat p |++| Text " = " |++| Line |+>| (getExpr e |> removeTopParen)
+    |++| getModifiers modifiers |++| getPat p |++| Text " = " |++| (getExprIndentIfSeq e |> removeTopParen)
 
 and getExpr =
     function
@@ -231,13 +233,13 @@ and getExpr =
         Text "function"
         |++| Line |++| (rows |> Seq.map (fun m -> getMatch m) |> delimLineText "| ")
     | ExprLambda (args, e) -> 
-        Text "fun " |++| (args |> Seq.map getPat |> delimText " ") |++| Text " -> " |++| getExpr e |> Paren
+        Text "fun " |++| (args |> Seq.map getPat |> delimText " ") |++| Text " -> " |++| getExprIndentIfSeq e |> Paren
     | ExprWithType (t, e) -> getExpr e |++| Text " : " |++| getTyp t
     | ExprModule (ModuleId m, e) -> Text "module " |++| Text m |++| Text " =" |++| Line |+>| getExpr e
     | ExprNamespace (NamespaceId m, e) -> Text "namespace " |++| Text m |++| Line |++| getExpr e
     | ExprType (TypeId tId, TypeDeclClass (modifiers, generics, args, members)) -> 
         Text "type " |++| Text tId |++| getModifiers modifiers |++| getGenerics generics |++| getPat args |++| Text " =" |++| Line 
-        |+>| (members |> Seq.map getMember |> lineblock)
+        |+>| (members |> Seq.map (getMember tId) |> lineblock)
     | ExprType (TypeId tId, t) -> Text "type " |++| Text tId |++| Text " = " |++| getDecl t
     | ExprNew (t, e) -> Text "new " |++| getTyp t |++| getExpr e
     | ExprDefaultOf t -> Text "Unchecked.defaultof<" |++| getTyp t |++| Text ">"
@@ -282,24 +284,29 @@ and getExpr =
             | 4 -> "Array4D"
             | _ -> failwith "not supported array rank"
         Text (arrayModule + ".zeroCreate ") |++| (ranks |> Seq.map getExpr |> delimText " ")
+    | ExprReturn e -> Text "return " |++| getExpr e
 
-and getExprIndentIfSeq e =
+and getExprIndentIfMultiline f e =
     match e with
-    | ExprSequence (_::_::_) -> getExpr e |> indentLineBlock
+    | ExprSequence (_::_::_) 
+    | ExprIf _ -> 
+        getExpr e |> indentLineBlock |> f
     | _ -> getExpr e
-and getExprIndentWithParIfSeq e = 
-    match e with
-    | ExprSequence (_::_::_) -> getExpr e |> indentLineBlock |> Paren
-    | _ -> getExpr e
+and getExprIndentIfSeq e = getExprIndentIfMultiline id e
 
+and getExprIndentWithParIfSeq e = getExprIndentIfMultiline Paren e
 
 let toFs (Program e) =
-    e 
-    |> cs2fs.AST.Transforms.unitAfterSequenceWithoutValue
-    |> cs2fs.AST.simplify 
-    |> cs2fs.AST.Transforms.globalNamespace
-    |> cs2fs.AST.Transforms.assignmentAsExpr
-    |> cs2fs.AST.Transforms.binaryOpWithString
-    |> cs2fs.AST.Transforms.entryPoint
-    |> cs2fs.AST.Transforms.typeReplecement
-    |> getExpr
+    let e =
+        e 
+        |> cs2fs.AST.Transforms.simplify 
+        |> cs2fs.AST.Transforms.lastReturn
+        |> cs2fs.AST.Transforms.unitAfterSequenceWithoutValue
+        |> cs2fs.AST.Transforms.globalNamespace
+        |> cs2fs.AST.Transforms.assignmentAsExpr
+        |> cs2fs.AST.Transforms.binaryOpWithString
+        |> cs2fs.AST.Transforms.entryPoint
+        |> cs2fs.AST.Transforms.typeReplecement
+        |> cs2fs.AST.Transforms.removeUnnecessaryTypeConversion
+    //printfn "%A" e
+    e |> getExpr
