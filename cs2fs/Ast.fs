@@ -123,6 +123,7 @@ let rec exprIsValue =
     | ExprRecord _
     | ExprTuple _
     | ExprVal _ -> true
+    | ExprTry(e,_,_)
     | ExprWithType(_,e)
     | ExprTypeConversion(_,e) -> exprIsValue e
     | ExprSequence es -> es |> List.last |> exprIsValue
@@ -288,13 +289,17 @@ module rec Transforms =
         |> exprMapOnce
 
     let lastReturn =
-        function
-        | ExprIf (_, ExprReturn _, None) -> None
-        | ExprSequence es ->
-            match List.tryLast es with
-            | Some (ExprReturn e) -> Some e
+        let replaceLastExpr =
+            function
+            | ExprSequence es ->
+                match List.tryLast es with
+                | Some (ExprReturn e) -> Some <| ExprSequence((List.take ((List.length es) - 1) es |> fst) @ [e])
+                | _ -> None
+            | ExprReturn e -> Some e
             | _ -> None
-        | ExprReturn e -> Some e
+        function
+        | ExprMember _
+        | ExprLambda _ as e -> (exprMapOnce replaceLastExpr) e |> Some
         | _ -> None
         |> exprMapOnce
 
