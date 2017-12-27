@@ -321,3 +321,10 @@ module rec Transforms =
         | TypTuple [] -> TypType (TypeId "unit") |> Some
         | _ -> None
         |> typMap
+
+    let constReplacement =
+        function
+        | ExprConst (ConstId "null") -> 
+            ExprConst (ConstId "Unchecked.defaultof<_>") |> Some
+        | _ -> None
+        |> exprMap

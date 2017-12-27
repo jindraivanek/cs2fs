@@ -307,6 +307,7 @@ let toFs (Program e) =
         |> cs2fs.AST.Transforms.binaryOpWithString
         |> cs2fs.AST.Transforms.entryPoint
         |> cs2fs.AST.Transforms.typeReplecement
+        |> cs2fs.AST.Transforms.constReplacement
         |> cs2fs.AST.Transforms.removeUnnecessaryTypeConversion
-    //printfn "%A" e
+    printfn "%A" e
     e |> getExpr
