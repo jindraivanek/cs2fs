@@ -312,12 +312,14 @@ module rec Transforms =
     
     let typeReplecement =
         let isOneOf xs x = xs |> Seq.exists ((=)x)
+        let tupleIfMulti = function | [t] -> t | ts -> TypTuple ts
         function
         | TypWithGeneric(gs, TypType (TypeId t)) when t |> isOneOf ["System.Func"; "Func"] -> 
             let (t::tup) = gs |> List.rev
-            TypFun (TypTuple (List.rev tup), t) |> Some
+            let inputTypes = tupleIfMulti (List.rev tup)
+            TypFun (inputTypes, t) |> Some
         | TypWithGeneric(gs, TypType (TypeId t)) when t |> isOneOf ["System.Action"; "Action"] -> 
-            TypFun (TypTuple gs, TypType (TypeId "unit")) |> Some
+            TypFun (tupleIfMulti gs, TypType (TypeId "unit")) |> Some
         | TypTuple [] -> TypType (TypeId "unit") |> Some
         | _ -> None
         |> typMap
