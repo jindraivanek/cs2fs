@@ -311,11 +311,13 @@ module rec Transforms =
         |> exprMap
     
     let typeReplecement =
+        let isOneOf xs x = xs |> Seq.exists ((=)x)
         function
-        | TypWithGeneric(gs, TypType (TypeId "System.Func")) -> 
+        | TypWithGeneric(gs, TypType (TypeId t)) when t |> isOneOf ["System.Func"; "Func"] -> 
             let (t::tup) = gs |> List.rev
             TypFun (TypTuple (List.rev tup), t) |> Some
-        | TypWithGeneric(gs, TypType (TypeId "System.Action")) -> 
+        | TypWithGeneric(gs, TypType (TypeId t)) when t |> isOneOf ["System.Action"; "Action"] -> 
             TypFun (TypTuple gs, TypType (TypeId "unit")) |> Some
+        | TypTuple [] -> TypType (TypeId "unit") |> Some
         | _ -> None
         |> typMap

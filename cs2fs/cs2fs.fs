@@ -48,26 +48,26 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
     let getTypeInfoFromType (t: ITypeSymbol) =
         match t with
         | :? INamedTypeSymbol as x -> 
-            let gs = x.TypeArguments |> Seq.map (fun t -> TypType (TypeId (fullName t))) |> Seq.toList
+            let gs = x.TypeArguments |> Seq.map (fun t -> TypType (TypeId t.Name)) |> Seq.toList
             fullName t, (gs |> Option.condition (List.isEmpty >> not))
         | :? IArrayTypeSymbol as x -> x.ToDisplayString(), None
         | _ -> fullName t, None
     let getTypeInfo (n: SyntaxNode) = getTypeInfoFromType (model.GetTypeInfo(n).Type) 
         
-    let getType (n:Syntax.TypeSyntax) =  
+    let getType genericSet (n:Syntax.TypeSyntax) =  
+        let genericSet = set genericSet
+        let genericConvert = function | TypType (TypeId t) when Set.contains t genericSet -> TypGeneric (GenericId t) | t -> t
         match n with
-        | :? Syntax.IdentifierNameSyntax as x -> x.Identifier.Text.Trim() |> TypeId |> TypType
+        | :? Syntax.IdentifierNameSyntax as x -> x.Identifier.ValueText.Trim() |> TypeId |> TypType |> genericConvert
         | _ ->
             let (t, gs) = getTypeInfo n
-            gs |> Option.map (fun g -> TypWithGeneric(g, TypType (TypeId t))) |> Option.fill (TypType (TypeId t))
+            gs |> Option.map (fun g -> TypWithGeneric(List.map genericConvert g, TypType (TypeId t))) |> Option.fill (TypType (TypeId t))
     let getTypeAbbr genericSet (n:Syntax.TypeSyntax) cons x =
         match n with
         | null -> x
         | _ -> 
-            let (t, gs) = getTypeInfo n
             if n.IsVar then x else 
-                if (Set.contains t genericSet) then cons (TypGeneric (GenericId t), x)
-                else cons (getType n, x)
+                cons (getType genericSet n, x)
     let getTypePat genericSet (n:Syntax.TypeSyntax) pat = getTypeAbbr genericSet n PatWithType pat
     let getExprWithType genericSet (n:Syntax.TypeSyntax) e = getTypeAbbr genericSet n ExprWithType e
     
@@ -96,7 +96,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         //let (TypeId t) = getType typ
         //TODO: proper generic type
         //ExprVal (ValId (sprintf "Unchecked.defaultof<%s>" t))
-        ExprDefaultOf (getType typ)
+        ExprDefaultOf (getType [] typ)
     
     let getTextModifiers (n:SyntaxNode) =
         match n with
@@ -286,7 +286,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | LiteralExpressionSyntax(SyntaxToken text) -> ExprConst <| ConstId text
         | ExpressionStatementSyntax(_,expr,_) -> descend expr
         | ObjectCreationExpressionSyntax(_, typ, args, init) -> 
-            ExprNew (getType typ, printArgumentList args)
+            ExprNew (getType [] typ, printArgumentList args)
         
         | ParenthesizedExpressionSyntax(_,e,_) -> descend e
         | LocalDeclarationStatementSyntax(isConst, varDecl, _) as n->
@@ -324,7 +324,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | FinallyClauseSyntax (_,body) -> descend body
         | ArrayCreationExpressionSyntax(t, rs, InitializerExpressionSyntax([]))
         | ArrayCreationExpressionSyntax(t, rs, null) -> 
-            ExprArrayInit (getType t, rs |> List.collect (fun r -> r.Sizes |> Seq.map descend |> Seq.toList))
+            ExprArrayInit (getType [] t, rs |> List.collect (fun r -> r.Sizes |> Seq.map descend |> Seq.toList))
         | ArrayCreationExpressionSyntax(_, _, InitializerExpressionSyntax(es)) 
         | ImplicitArrayCreationExpressionSyntax(_,_,_,InitializerExpressionSyntax(es))
         | InitializerExpressionSyntax(es) -> ExprArray(es |> List.map descend)
@@ -332,8 +332,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         
         | PredefinedTypeSyntax (SyntaxToken tok)
         | ThisExpressionSyntax (SyntaxToken tok) -> ExprVal(ValId tok)
-        | CastExpressionSyntax(_,t,_,e) -> ExprTypeConversion (getType t, descend e)
-        | TypeOfExpressionSyntax (_,_,t,_) -> ExprWithGeneric([getType t], ExprVal(ValId "typeof"))
+        | CastExpressionSyntax(_,t,_,e) -> ExprTypeConversion (getType [] t, descend e)
+        | TypeOfExpressionSyntax (_,_,t,_) -> ExprWithGeneric([getType [] t], ExprVal(ValId "typeof"))
 
         // not supported syntax
         | BreakStatementSyntax _ -> ExprVal(ValId "break")
