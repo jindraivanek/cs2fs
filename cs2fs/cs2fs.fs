@@ -50,6 +50,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | :? INamedTypeSymbol as x -> 
             let gs = x.TypeArguments |> Seq.map (fun t -> TypType (TypeId t.Name)) |> Seq.toList
             fullName t, (gs |> Option.condition (List.isEmpty >> not))
+        | :? ITypeParameterSymbol as x -> x.Name, None
         | :? IArrayTypeSymbol as x -> x.ToDisplayString(), None
         | _ -> fullName t, None
     let getTypeInfo (n: SyntaxNode) = getTypeInfoFromType (model.GetTypeInfo(n).Type) 
@@ -57,16 +58,25 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
     let getType genericSet (n:Syntax.TypeSyntax) =  
         let genericSet = set genericSet
         let genericConvert = function | TypType (TypeId t) when Set.contains t genericSet -> TypGeneric (GenericId t) | t -> t
-        match n with
-        | :? Syntax.IdentifierNameSyntax as x -> x.Identifier.ValueText.Trim() |> TypeId |> TypType |> genericConvert
-        | _ ->
-            let (t, gs) = getTypeInfo n
-            gs |> Option.map (fun g -> TypWithGeneric(List.map genericConvert g, TypType (TypeId t))) |> Option.fill (TypType (TypeId t))
+        let (t,gs) =
+            match n with
+            | :? Syntax.IdentifierNameSyntax as x -> 
+                x.Identifier.ValueText.Trim(), None
+            | :? Syntax.GenericNameSyntax as x -> 
+                let t = x.Identifier.ValueText.Trim()
+                let gs = 
+                    match x.TypeArgumentList with
+                    | TypeArgumentListSyntax(_,args,_) -> args |> List.map (getTypeInfo >> fst >> TypeId >> TypType >> genericConvert) |> Some
+                t, gs
+            | _ ->
+                getTypeInfo n
+        let tt = genericConvert <| TypType (TypeId t)
+        gs |> Option.map (fun g -> TypWithGeneric(List.map genericConvert g, tt)) |> Option.fill tt
     let getTypeAbbr genericSet (n:Syntax.TypeSyntax) cons x =
         match n with
         | null -> x
         | _ -> 
-            if n.IsVar then x else 
+            if n.IsVar then x else
                 cons (getType genericSet n, x)
     let getTypePat genericSet (n:Syntax.TypeSyntax) pat = getTypeAbbr genericSet n PatWithType pat
     let getExprWithType genericSet (n:Syntax.TypeSyntax) e = getTypeAbbr genericSet n ExprWithType e
