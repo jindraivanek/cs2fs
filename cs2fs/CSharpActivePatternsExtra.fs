@@ -2,6 +2,7 @@ module cs2fs.CSharpActivePatternsExtra
 
 open Microsoft.CodeAnalysis
 open Microsoft.CodeAnalysis.CSharp
+open Microsoft.CodeAnalysis.CSharp.Syntax
 
 let (|SyntaxToken|) (tok: Microsoft.CodeAnalysis.SyntaxToken) =
     tok.Text.Trim()
@@ -29,6 +30,13 @@ let (|TypeParameterListSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     | :? Microsoft.CodeAnalysis.CSharp.Syntax.TypeParameterListSyntax as node ->
       Some (node.LessThanToken, node.Parameters |> Seq.toList, node.GreaterThanToken)
     | _ -> None
+
+let (|TypeArgumentListSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
+    match node with
+    | :? Microsoft.CodeAnalysis.CSharp.Syntax.TypeArgumentListSyntax as node ->
+      Some (node.LessThanToken, node.Arguments |> Seq.toList, node.GreaterThanToken)
+    | _ -> None
+
 
 let (|ArgumentListSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     match node with
