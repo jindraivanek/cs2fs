@@ -55,18 +55,24 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | _ -> fullName t, None
     let getTypeInfo (n: SyntaxNode) = getTypeInfoFromType (model.GetTypeInfo(n).Type) 
         
-    let getType genericSet (n:Syntax.TypeSyntax) =  
+    let rec getType (genericSet: #seq<_>) (n:Syntax.TypeSyntax) =  
         let genericSet = set genericSet
         let genericConvert = function | TypType (TypeId t) when Set.contains t genericSet -> TypGeneric (GenericId t) | t -> t
         let (t,gs) =
             match n with
             | :? Syntax.IdentifierNameSyntax as x -> 
                 x.Identifier.ValueText.Trim(), None
+            | :? Syntax.QualifiedNameSyntax as x -> 
+                let rec f (n: NameSyntax) =
+                    match n with
+                    | :? Syntax.QualifiedNameSyntax as x -> f x.Left + "." + x.Right.Identifier.ValueText.Trim()
+                    | :? Syntax.IdentifierNameSyntax as x -> x.Identifier.ValueText.Trim()
+                f x, None
             | :? Syntax.GenericNameSyntax as x -> 
                 let t = x.Identifier.ValueText.Trim()
                 let gs = 
                     match x.TypeArgumentList with
-                    | TypeArgumentListSyntax(_,args,_) -> args |> List.map (getTypeInfo >> fst >> TypeId >> TypType >> genericConvert) |> Some
+                    | TypeArgumentListSyntax(_,args,_) -> args |> List.map (getType Seq.empty) |> Some
                 t, gs
             | _ ->
                 getTypeInfo n
@@ -102,6 +108,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 args |> List.map (fun (ArgumentSyntax(_, refOrOut, e)) -> 
                     descend e) |> ExprTuple
             args
+        | null -> ExprTuple []
+        | _ as x -> failwithf "printArgumentList: %A" x
     let defInit typ = 
         //let (TypeId t) = getType typ
         //TODO: proper generic type
@@ -146,7 +154,10 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             
         typeName, genPars
     
-    let haveConvertedType (n: SyntaxNode) = 
+    let haveConvertedType (n: SyntaxNode) =
+        match n with
+        | null -> false
+        | _ ->
         let t = model.GetTypeInfo(n)
         t.Type <> null && t.Type <> t.ConvertedType
     
@@ -259,6 +270,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             match stmts with
             | [] -> ExprVal (ValId "()")
             | _ -> stmts |> Seq.map descend |> sequence
+        | ReturnStatementSyntax(_,null,_) -> ExprConst (ConstId "()") |> ExprReturn
         | ReturnStatementSyntax(_,e,_) -> descend e |> ExprReturn
         | SimpleLambdaExpressionSyntax(_, par, _, e) -> ExprLambda([getParameterSyntax [] par], descend e)
         | ParenthesizedLambdaExpressionSyntax(_, pars, _, e) -> ExprLambda([printParamaterList [] pars], descend e)
@@ -296,7 +308,11 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | LiteralExpressionSyntax(SyntaxToken text) -> ExprConst <| ConstId text
         | ExpressionStatementSyntax(_,expr,_) -> descend expr
         | ObjectCreationExpressionSyntax(_, typ, args, init) -> 
-            ExprNew (getType [] typ, printArgumentList args)
+            match args, init with
+            | null, null -> misssingCaseExpr node
+            | _,null -> ExprNew (getType [] typ, printArgumentList args)
+            | null,_ -> ExprNew (getType [] typ, ExprTuple [descend init])
+            | _, _ -> misssingCaseExpr node
         
         | ParenthesizedExpressionSyntax(_,e,_) -> descend e
         | LocalDeclarationStatementSyntax(isConst, varDecl, _) as n->

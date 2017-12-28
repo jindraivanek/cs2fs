@@ -147,7 +147,7 @@ let rec getPat =
     | PatList ts -> ts |> List.map getPat |> delimSurroundText "; " "[" "]" 
     | PatRecord rows -> rows |> Seq.map (fun (FieldId f, p) -> Text (f + " = ") |++| getPat p) |> delimText "; " |> surroundText "{" "}" 
     | PatWithType (t, PatWildcard) -> Text ":? " |++| getTyp t
-    | PatWithType (t, p) -> [getPat p; getTyp t] |> delimText " : "
+    | PatWithType (t, p) -> [getPat p; getTyp t] |> delimText " : " |> Paren
     | PatBindAs (ValId v, p) -> [getPat p;  Text v] |> delimText " as "
 
 let getPatNoType =
@@ -166,7 +166,7 @@ let rec getDecl =
 
 let rec getMatch (p, whenE, e) =
     let whenClause = whenE |> Option.map (fun x -> Text " when " |++| getExpr x) |> Option.fill (Text "")
-    [getPat p |++| whenClause; getExpr e] |> delimText " -> "
+    [getPat p |++| whenClause; getExprM e] |> delimText " -> "
 
 and getMember className x =
     let property pat init getter (haveSetter, setter) =
@@ -201,7 +201,7 @@ and getBind header modifiers isRec isFirstRec (p, e) =
     | true, true -> Text (header + " rec ")
     | true, false -> Text "and "
     | _ -> Text (header + " ") 
-    |++| getModifiers modifiers |++| getPat p |++| Text " = " |++| (getExprIndentIfSeq e |> removeTopParen)
+    |++| getModifiers modifiers |++| getPat p |++| Text " = " |++| (getExprM e |> removeTopParen)
 
 and getExpr =
     function
@@ -210,8 +210,8 @@ and getExpr =
     | ExprApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText " " |> Paren
     | ExprDotApp ((ExprConst _) as e1, e2) -> [getExpr e1 |> Paren; getExpr e2] |> delimText "."
     | ExprDotApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText "."
-    | ExprItemApp (e1, e2) -> [getExpr e1; surroundText "[" "]" (e2 |> getExpr)] |> delimText "."
-    | ExprInfixApp (e1, ValId v, e2) -> [singleLiner (getExpr e1); Text v; singleLiner (getExpr e2)] |> delimText " " |> Paren
+    | ExprItemApp (e1, e2) -> [getExpr e1; surroundText "[" "]" (e2 |> getExprNP)] |> delimText "."
+    | ExprInfixApp (e1, ValId v, e2) -> [singleLiner (getExprNP e1); Text v; singleLiner (getExprNP e2)] |> delimText " " |> Paren
     | ExprTuple ts -> ts |> List.map getExpr |> delimText ", " |> Paren
     | ExprList ts -> ts |> List.map getExpr |> delimSurroundText "; " "[" "]"
     | ExprArray ts -> ts |> List.map getExpr |> delimSurroundText "; " "[|" "|]"
@@ -233,7 +233,7 @@ and getExpr =
         Text "function"
         |++| Line |++| (rows |> Seq.map (fun m -> getMatch m) |> delimLineText "| ")
     | ExprLambda (args, e) -> 
-        Text "fun " |++| (args |> Seq.map getPat |> delimText " ") |++| Text " -> " |++| getExprIndentIfSeq e |> Paren
+        Text "fun " |++| (args |> Seq.map getPat |> delimText " ") |++| Text " -> " |++| getExprMNP e |> Paren
     | ExprWithType (t, e) -> getExpr e |++| Text " : " |++| getTyp t
     | ExprModule (ModuleId m, e) -> Text "module " |++| Text m |++| Text " =" |++| Line |+>| getExpr e
     | ExprNamespace (NamespaceId m, e) -> Text "namespace " |++| Text m |++| Line |++| getExpr e
@@ -245,19 +245,19 @@ and getExpr =
     | ExprDefaultOf t -> Text "Unchecked.defaultof<" |++| getTyp t |++| Text ">"
     | ExprInclude (ModuleId m) -> Text "open " |++| Text m
     | ExprIf (cond, thenExpr, elseExprMaybe) ->
-        Text "if " |++| getExpr cond |++| LineText "then" |++| indentLineBlock (getExpr thenExpr)
-        |++| opt elseExprMaybe (fun e -> LineText "else" |++| indentLineBlock (getExpr e))
+        Text "if " |++| getExprNP cond |++| LineText "then" |++| indentLineBlock (getExprNP thenExpr)
+        |++| opt elseExprMaybe (fun e -> LineText "else" |++| indentLineBlock (getExprNP e))
     | ExprFor (pat, collection, expr) ->
-        Text "for " |++| getPat pat |++| Text " in " |++| getExpr collection |++| Text " do" |++| indentLineBlock (getExpr expr)
+        Text "for " |++| getPat pat |++| Text " in " |++| getExprNP collection |++| Text " do" |++| indentLineBlock (getExprNP expr)
     | ExprWhile (cond, expr) ->
-        Text "while " |++| getExprIndentWithParIfSeq cond |++| Text " do" |++| indentLineBlock (getExpr expr)
-    | ExprDo expr -> Text "do " |++| indentLineBlock (getExpr expr)
+        Text "while " |++| getExprMP cond |++| Text " do" |++| indentLineBlock (getExprNP expr)
+    | ExprDo expr -> Text "do " |++| indentLineBlock (getExprNP expr)
     | ExprTry (expr, catches, finallyMaybe) ->
         Text "try" |++| indentLineBlock (getExpr expr)
         |++| Line |++| Text "with" |++| indentLineBlock (catches |> Seq.map (fun m -> getMatch m) |> delimLineText "| ")
         |++| opt finallyMaybe (fun e -> Line |++| Text "finally" |++| indentLineBlock (getExpr e))
     | ExprSequence es -> 
-        es |> Seq.map getExpr |> Seq.map removeTopParen |> delimLineText ""
+        es |> Seq.map getExprNP |> delimLineText ""
     | ExprAttribute (attrs, e) ->
         attrs |> List.map (fun (AttributeId x) -> Text x) |> delimSurroundText "; " "[<" ">]" |++| Line
         |++| getExpr e
@@ -284,17 +284,25 @@ and getExpr =
             | 4 -> "Array4D"
             | _ -> failwith "not supported array rank"
         Text (arrayModule + ".zeroCreate ") |++| (ranks |> Seq.map getExpr |> delimText " ")
-    | ExprReturn e -> Text "return " |++| getExpr e
+    | ExprReturn e -> Text "return " |++| getExprM e
 
 and getExprIndentIfMultiline f e =
-    match e with
-    | ExprSequence (_::_::_) 
-    | ExprIf _ -> 
+    let b = getExpr e
+    let rec blockHaveLine = function
+    | Block bs -> bs |> List.exists blockHaveLine
+    | IndentBlock b -> blockHaveLine b
+    | Paren b -> blockHaveLine b
+    | Line -> true
+    | _ -> false
+    if b |> blockHaveLine then
         getExpr e |> indentLineBlock |> f
-    | _ -> getExpr e
-and getExprIndentIfSeq e = getExprIndentIfMultiline id e
+    else getExpr e
+and getExprM e = getExprIndentIfMultiline id e
 
-and getExprIndentWithParIfSeq e = getExprIndentIfMultiline Paren e
+and getExprMP e = getExprIndentIfMultiline Paren e
+
+and getExprNP e = getExpr e |> removeTopParen
+and getExprMNP e = getExprM e |> removeTopParen
 
 let toFs (Program e) =
     let e =
@@ -309,5 +317,5 @@ let toFs (Program e) =
         |> cs2fs.AST.Transforms.typeReplecement
         |> cs2fs.AST.Transforms.constReplacement
         |> cs2fs.AST.Transforms.removeUnnecessaryTypeConversion
-    printfn "%A" e
+    //printfn "%A" e
     e |> getExpr

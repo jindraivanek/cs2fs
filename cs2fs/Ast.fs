@@ -202,7 +202,7 @@ module rec Transforms =
         match n with
         | TypType t -> TypType t
         | TypGeneric g -> TypGeneric g
-        | TypWithGeneric (g, t) -> TypWithGeneric (g, tF t)
+        | TypWithGeneric (g, t) -> TypWithGeneric (g |> List.map tF, tF t)
         | TypFun (t1, t2) -> TypFun (tF t1, tF t2)
         | TypTuple xs -> xs |> List.map tF |> TypTuple
     
@@ -299,6 +299,8 @@ module rec Transforms =
             | _ -> None
         function
         | ExprMember _
+        | ExprMemberProperty _
+        | ExprMemberPropertyWithSet _
         | ExprLambda _ as e -> (exprMapOnce replaceLastExpr) e |> Some
         | _ -> None
         |> exprMapOnce
@@ -318,9 +320,14 @@ module rec Transforms =
             let (t::tup) = gs |> List.rev
             let inputTypes = tupleIfMulti (List.rev tup)
             TypFun (inputTypes, t) |> Some
+        | TypType (TypeId t) when t |> isOneOf ["System.Action"; "Action"] -> 
+            TypFun (tupleIfMulti [], TypType (TypeId "unit")) |> Some
         | TypWithGeneric(gs, TypType (TypeId t)) when t |> isOneOf ["System.Action"; "Action"] -> 
             TypFun (tupleIfMulti gs, TypType (TypeId "unit")) |> Some
         | TypTuple [] -> TypType (TypeId "unit") |> Some
+        | TypType (TypeId "System.String") -> TypType (TypeId "string") |> Some
+        | TypType (TypeId "System.Int32") -> TypType (TypeId "int") |> Some
+        | TypType (TypeId "System.Double") -> TypType (TypeId "float") |> Some
         | _ -> None
         |> typMap
 
@@ -328,5 +335,6 @@ module rec Transforms =
         function
         | ExprConst (ConstId "null") -> 
             ExprConst (ConstId "Unchecked.defaultof<_>") |> Some
+        | ExprInfixApp (e1, ValId "as" , e2) -> ExprInfixApp (e1, ValId ":?>" , e2) |> Some
         | _ -> None
         |> exprMap
