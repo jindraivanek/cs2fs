@@ -18,6 +18,7 @@ What is not supported, and it's not planned at this stage:
 
 * early `return`s, `break`, `continue`.
 * non-explicit interface implementation.
+* correct return value of constructors.
 
 What *cannot* be supported due to limitations of F#:
 
