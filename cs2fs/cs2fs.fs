@@ -87,9 +87,14 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
     let getTypePat genericSet (n:Syntax.TypeSyntax) pat = getTypeAbbr genericSet n PatWithType pat
     let getExprWithType genericSet (n:Syntax.TypeSyntax) e = getTypeAbbr genericSet n ExprWithType e
     
-    let getParameterSyntax generics (ParameterSyntax(attrs, typ, SyntaxToken ident, _)) = 
+    let getParameterSyntax generics (ParameterSyntax(attrs, typ, SyntaxToken ident, equalsValue)) = 
         let genericSet = generics |> Seq.choose (function | TypGeneric (GenericId g) -> Some g | _ -> None) |> set
-        ident |> ValId |> PatBind |> getTypePat genericSet typ
+        let optionalValueExpr = 
+            if isNull equalsValue then None else
+                Some (ExprBind ([], ident |> ValId |> PatBind, ExprApp (ExprVal (ValId "defaultArg"), 
+                                 ExprApp( ExprVal (ValId ident), equalsValue.Value.ToFullString().Trim() |> ConstId |> ExprConst))))
+        let ident = if isNull equalsValue then ident else sprintf "?%s" ident
+        ident |> ValId |> PatBind |> getTypePat genericSet typ, optionalValueExpr
     
     let getParameters = function
         | ParameterListSyntax(_, prms, _) ->
@@ -97,8 +102,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | _ -> [] 
 
     let printParamaterList generics ps = 
-        getParameters ps |> List.map (getParameterSyntax generics) 
-        |> PatTuple
+        let (pars, optionalExrs) = getParameters ps |> List.map (getParameterSyntax generics) |> List.unzip
+        pars |> PatTuple, optionalExrs |> List.choose id
     
     let printArgumentList =
         function
@@ -198,8 +203,9 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         match n with
         | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,SyntaxToken ident,typePars,pars,typeParsConstrs,block,arrowExpr,_) as n -> 
             let gs = getGenerics typePars
+            let (pars, optionalParExprs) = printParamaterList (classGenerics @ gs) pars
             [ 
-                ExprMember (ValId ident, gs, getModifiers n, thisIfNotStatic n, printParamaterList (classGenerics @ gs) pars, descend block) 
+                ExprMember (ValId ident, gs, getModifiers n, thisIfNotStatic n, pars, descend block |> fun b -> ExprSequence <| optionalParExprs @ [b]) 
                     |> applyAttributes attrs 
             ]
             
@@ -207,8 +213,9 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             match getParameters pars with
             | [] -> []
             | _ ->
+            let (pars, optionalParExprs) = printParamaterList (classGenerics) pars
             [ 
-                ExprMemberConstructor (getModifiers n, printParamaterList classGenerics pars, descend block) 
+                ExprMemberConstructor (getModifiers n, pars, descend block |> fun b -> ExprSequence <| optionalParExprs @ [b]) 
                     |> applyAttributes attrs 
             ]
         
@@ -276,9 +283,9 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             | _ -> stmts |> Seq.map descend |> sequence
         | ReturnStatementSyntax(_,null,_) -> ExprConst (ConstId "()") |> ExprReturn
         | ReturnStatementSyntax(_,e,_) -> descend e |> ExprReturn
-        | SimpleLambdaExpressionSyntax(_, par, _, e) -> ExprLambda([getParameterSyntax [] par], descend e)
-        | ParenthesizedLambdaExpressionSyntax(_, pars, _, e) -> ExprLambda([printParamaterList [] pars], descend e)
-        | AnonymousMethodExpressionSyntax(_, _, _, pars, body) -> ExprLambda ([printParamaterList [] pars], descend body)
+        | SimpleLambdaExpressionSyntax(_, par, _, e) -> ExprLambda([getParameterSyntax [] par |> fst], descend e)
+        | ParenthesizedLambdaExpressionSyntax(_, pars, _, e) -> ExprLambda([printParamaterList [] pars |> fst], descend e)
+        | AnonymousMethodExpressionSyntax(_, _, _, pars, body) -> ExprLambda ([printParamaterList [] pars |> fst], descend body)
         | InvocationExpressionSyntax(e, args) -> ExprApp (descend e, printArgumentList args)
         | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, ExprVal (ValId <| name.ToFullString().Trim()))
         | ElementAccessExpressionSyntax(e, args) -> ExprItemApp (descend e, printArgumentList args)
