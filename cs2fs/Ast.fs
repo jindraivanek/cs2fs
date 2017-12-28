@@ -303,7 +303,7 @@ module rec Transforms =
         | ExprMemberPropertyWithSet _
         | ExprLambda _ as e -> (exprMapOnce replaceLastExpr) e |> Some
         | _ -> None
-        |> exprMapOnce
+        |> exprMap
 
     let removeUnnecessaryTypeConversion =
         function

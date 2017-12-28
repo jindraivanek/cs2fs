@@ -274,6 +274,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | ReturnStatementSyntax(_,e,_) -> descend e |> ExprReturn
         | SimpleLambdaExpressionSyntax(_, par, _, e) -> ExprLambda([getParameterSyntax [] par], descend e)
         | ParenthesizedLambdaExpressionSyntax(_, pars, _, e) -> ExprLambda([printParamaterList [] pars], descend e)
+        | AnonymousMethodExpressionSyntax(_, _, _, pars, body) -> ExprLambda ([printParamaterList [] pars], descend body)
         | InvocationExpressionSyntax(e, args) -> ExprApp (descend e, printArgumentList args)
         | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, ExprVal (ValId <| name.ToFullString().Trim()))
         | ElementAccessExpressionSyntax(e, args) -> ExprItemApp (descend e, printArgumentList args)
