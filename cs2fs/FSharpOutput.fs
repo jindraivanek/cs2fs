@@ -211,7 +211,7 @@ and getExpr =
     | ExprDotApp ((ExprConst _) as e1, e2) -> [getExpr e1 |> Paren; getExpr e2] |> delimText "."
     | ExprDotApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText "."
     | ExprItemApp (e1, e2) -> [getExpr e1; surroundText "[" "]" (e2 |> getExprNP)] |> delimText "."
-    | ExprInfixApp (e1, ValId v, e2) -> [singleLiner (getExprNP e1); Text v; singleLiner (getExprNP e2)] |> delimText " " |> Paren
+    | ExprInfixApp (e1, ValId v, e2) -> [getExprMNP e1; Text v; getExprMNP e2] |> delimText " " |> Paren
     | ExprTuple ts -> ts |> List.map getExpr |> delimText ", " |> Paren
     | ExprList ts -> ts |> List.map getExpr |> delimSurroundText "; " "[" "]"
     | ExprArray ts -> ts |> List.map getExpr |> delimSurroundText "; " "[|" "|]"
@@ -245,8 +245,8 @@ and getExpr =
     | ExprDefaultOf t -> Text "Unchecked.defaultof<" |++| getTyp t |++| Text ">"
     | ExprInclude (ModuleId m) -> Text "open " |++| Text m
     | ExprIf (cond, thenExpr, elseExprMaybe) ->
-        Text "if " |++| getExprNP cond |++| LineText "then" |++| indentLineBlock (getExprNP thenExpr)
-        |++| opt elseExprMaybe (fun e -> LineText "else" |++| indentLineBlock (getExprNP e))
+        Text "if " |++| getExprNP cond |++| LineText "then " |++| getExprMNP thenExpr
+        |++| opt elseExprMaybe (fun e -> LineText "else " |++| getExprMNP e)
     | ExprFor (pat, collection, expr) ->
         Text "for " |++| getPat pat |++| Text " in " |++| getExprNP collection |++| Text " do" |++| indentLineBlock (getExprNP expr)
     | ExprWhile (cond, expr) ->
@@ -265,7 +265,7 @@ and getExpr =
         getExpr e |++| (g |> List.map getTyp |> delimSurroundText ", " "<" ">")
       
     | ExprTypeConversion (t, e) -> 
-        let def = (Paren <| getExpr e) |++| Text " :> " |++| (getTyp t)
+        let def = getExpr e |++| Text " :> " |++| (getTyp t)
         match t with
         | TypType (TypeId tt) ->
             match tt with

@@ -72,7 +72,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 let t = x.Identifier.ValueText.Trim()
                 let gs = 
                     match x.TypeArgumentList with
-                    | TypeArgumentListSyntax(_,args,_) -> args |> List.map (getType Seq.empty) |> Some
+                    | TypeArgumentListSyntax(_,args,_) -> args |> List.map (getType (Set.toSeq genericSet)) |> Some
                 t, gs
             | _ ->
                 getTypeInfo n
