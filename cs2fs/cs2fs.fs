@@ -251,17 +251,21 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let s = model.GetDeclaredSymbol(c)
             let baseT = s.BaseType |> Option.ofObj
             let gs = getGenerics typePars
-            let interfaces = 
-                match bases with 
+            let bases =
+                match bases with
                 | BaseListSyntax bases -> 
-                    bases |> List.filter (fun b -> baseT |> Option.forall (fun x -> x.Name <> b.ToFullString().Trim()))
+                    bases
                     |> List.map (fun b -> fst <| getTypeInfo b.Type)
                 | _ -> []
+            let interfaces = bases |> List.filter (fun b -> baseT |> Option.forall (fun x -> x.Name <> b)) |> set
+            printfn "%A" interfaces
             let interfaceMembers = 
                 interfaces 
                 |> Seq.map (fun x -> ExprInterfaceImpl (TypType (TypeId (sprintf "%s" x)), ExprVal (ValId "???"))) |> Seq.toList
+            let inheritFrom = bases |> List.filter (fun b -> Set.contains b interfaces |> not)
+            let inheritMembers = inheritFrom |> List.map (fun b -> ExprInherit (TypType (TypeId b)))
             ExprType (TypeId ident,
-                TypeDeclClass (getModifiers node, gs, PatTuple[], (members |> List.collect (getMembers gs)) @ interfaceMembers))
+                TypeDeclClass (getModifiers node, gs, PatTuple[], inheritMembers @ (members |> List.collect (getMembers gs)) @ interfaceMembers))
             |> applyAttributes attrs
 
         | MethodDeclarationSyntax _ as n -> ExprType (TypeId "Tmp", TypeDeclClass (getModifiers node, [], PatTuple[], (getMembers [] n)))

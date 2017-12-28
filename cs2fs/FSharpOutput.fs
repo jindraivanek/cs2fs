@@ -191,6 +191,7 @@ and getMember className x =
     | ExprMemberProperty (pat, init, getter) -> property pat init getter (false, None)
     | ExprMemberPropertyWithSet (pat, init, getter, setter) -> property pat init getter (true, setter)
     | ExprInterfaceImpl (t, e) -> Text "interface " |++| getTyp t |++| Text " with" |++| Line |+>| getExpr e
+    | ExprInherit t  -> Text "inherit " |++| getTyp t |++| Text "()"
     | ExprAttribute (attrs, e) -> 
         attrs |> List.map (fun (AttributeId x) -> Text x) |> delimSurroundText "; " "[<" ">]" |++| Line
         |++| getMember className e

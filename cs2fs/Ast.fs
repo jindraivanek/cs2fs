@@ -79,6 +79,7 @@ and Expr =
 | ExprMemberProperty of Pat * Expr * Expr option
 | ExprMemberPropertyWithSet of Pat * Expr * Expr option * Expr option
 | ExprInterfaceImpl of Typ * Expr
+| ExprInherit of Typ
 
 | ExprAttribute of AttributeId list * Expr
 
@@ -176,6 +177,7 @@ module rec Transforms =
         | ExprMemberProperty (p, e, eo) -> ExprMemberProperty (pF p, eF e, Option.map eF eo)
         | ExprMemberPropertyWithSet (p, e, eo, eo2) -> ExprMemberPropertyWithSet (pF p, eF e, Option.map eF eo, Option.map eF eo2)
         | ExprInterfaceImpl (t,e) -> ExprInterfaceImpl (tF t, eF e)
+        | ExprInherit t -> ExprInherit (tF t)
         | ExprWithGeneric (g,e) -> ExprWithGeneric (List.map tF g, eF e)
         | ExprTry (e, m, ef) -> ExprTry (eF e, (m |> List.map (fun (p, eo, e) -> pF p, Option.map eF eo, eF e)), Option.map eF ef)
 

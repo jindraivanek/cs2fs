@@ -6,7 +6,7 @@ public class B {
 
 public class Amb : B, IDisposable
 {
-    public void Dispose()
+    public void IDisposable.Dispose()
     {
     }
 }
