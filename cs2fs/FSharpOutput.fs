@@ -208,7 +208,7 @@ and getExpr =
     function
     | ExprConst (ConstId c) -> Text c
     | ExprVal (ValId v) -> Text v
-    | ExprApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText " " |> Paren
+    | ExprApp (e1, e2) -> [getExpr e1 |> Paren; getExpr e2 |> Paren] |> delimText " " |> Paren
     | ExprDotApp ((ExprConst _) as e1, e2) -> [getExpr e1 |> Paren; getExpr e2] |> delimText "."
     | ExprDotApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText "."
     | ExprItemApp (e1, e2) -> [getExpr e1; surroundText "[" "]" (e2 |> getExprNP)] |> delimText "."
@@ -306,6 +306,7 @@ and getExprNP e = getExpr e |> removeTopParen
 and getExprMNP e = getExprM e |> removeTopParen
 
 let toFs (Program e) =
+    printfn "%A" e
     let e =
         e 
         |> cs2fs.AST.Transforms.simplify 

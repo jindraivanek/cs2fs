@@ -360,6 +360,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                     ident |> getTypePat (set[]) t, exprFilter |> Option.map descend, descend block
             ExprTry(descend body, catches |> List.map getMatch, finallyBody |> Option.ofNull |> Option.map descend)
         | FinallyClauseSyntax (_,body) -> descend body
+        | ThrowStatementSyntax (_, e, _) -> ExprApp (ExprVal (ValId "raise"), descend e)
         | ArrayCreationExpressionSyntax(t, rs, InitializerExpressionSyntax([]))
         | ArrayCreationExpressionSyntax(t, rs, null) -> 
             ExprArrayInit (getType [] t, rs |> List.collect (fun r -> r.Sizes |> Seq.map descend |> Seq.toList))
