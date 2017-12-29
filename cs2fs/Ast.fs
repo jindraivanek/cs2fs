@@ -340,3 +340,11 @@ module rec Transforms =
         | ExprInfixApp (e1, ValId "as" , e2) -> ExprInfixApp (e1, ValId ":?>" , e2) |> Some
         | _ -> None
         |> exprMap
+
+module Mk =
+    open cs2fs.FSharpDefs
+    let mkValId id =
+        let id = if Set.contains id fsharpKeywords then "``" + id + "``" else id
+        ValId id
+    let mkExprVal = ExprVal << mkValId
+    let mkPatBind = PatBind << mkValId

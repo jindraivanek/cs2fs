@@ -5,6 +5,7 @@ open Microsoft.CodeAnalysis.CSharp
 open cs2fs.AST
 open cs2fs.CSharpActivePatternsExtra
 open Microsoft.CodeAnalysis.CSharp.Syntax
+open AST.Mk
 let sequence xs = xs |> Seq.toList |> ExprSequence
 let (|++|) x y = ExprSequence [x;y]
     
@@ -91,10 +92,11 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         let genericSet = generics |> Seq.choose (function | TypGeneric (GenericId g) -> Some g | _ -> None) |> set
         let optionalValueExpr = 
             if isNull equalsValue then None else
-                Some (ExprBind ([], ident |> ValId |> PatBind, ExprApp (ExprVal (ValId "defaultArg"), 
-                                 ExprApp( ExprVal (ValId ident), equalsValue.Value.ToFullString().Trim() |> ConstId |> ExprConst))))
-        let ident = if isNull equalsValue then ident else sprintf "?%s" ident
-        ident |> ValId |> PatBind |> getTypePat genericSet typ, optionalValueExpr
+                Some (ExprBind ([], ident |> mkPatBind, ExprApp (mkExprVal "defaultArg", 
+                                 ExprApp(mkExprVal ident, equalsValue.Value.ToFullString().Trim() |> ConstId |> ExprConst))))
+        let bind = mkPatBind ident 
+        let bind = if isNull equalsValue then bind else match bind with |PatBind (ValId x) -> PatBind (ValId ("?"+x)) |_ -> bind
+        bind |> getTypePat genericSet typ, optionalValueExpr
     
     let getParameters = function
         | ParameterListSyntax(_, prms, _) ->
@@ -116,9 +118,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | null -> ExprTuple []
         | _ as x -> failwithf "printArgumentList: %A" x
     let defInit typ = 
-        //let (TypeId t) = getType typ
         //TODO: proper generic type
-        //ExprVal (ValId (sprintf "Unchecked.defaultof<%s>" t))
         ExprDefaultOf (getType [] typ)
     
     let getTextModifiers (n:SyntaxNode) =
@@ -189,7 +189,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             vars |> Seq.map
                 (function
                  | VariableDeclaratorSyntax(SyntaxToken ident, args, init) -> 
-                     ValId ident |> PatBind |> getTypePat (set[]) typ, descendOption init (defInit typ))
+                     mkPatBind ident |> getTypePat (set[]) typ, descendOption init (defInit typ))
         | _ -> seq [PatConst(ConstId "getVariableDeclarators"), misssingCaseExpr n] //<| "getVariableDeclarators " + missingCaseTreePrinter n
     
     let getGenerics p =
@@ -223,7 +223,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let accs = 
                 accessors |> List.map (fun (AccessorDeclarationSyntax(attrs, SyntaxToken keyword, block, _)) ->
                     keyword, Option.ofObj block)
-            let (propPat, init) = ValId ident |> PatBind |> getTypePat (set[]) typ, defInit typ
+            let (propPat, init) = mkPatBind ident |> getTypePat (set[]) typ, defInit typ
             match accs with
             | [] -> []
             | ["get", getBlock] -> [ExprMemberProperty (propPat, init, descendToOption getBlock) |> applyAttributes attrs]
@@ -268,7 +268,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             printfn "%A" interfaces
             let interfaceMembers = 
                 interfaces 
-                |> Seq.map (fun x -> ExprInterfaceImpl (TypType (TypeId (sprintf "%s" x)), ExprVal (ValId "???"))) |> Seq.toList
+                |> Seq.map (fun x -> ExprInterfaceImpl (TypType (TypeId (sprintf "%s" x)), mkExprVal "???")) |> Seq.toList
             let inheritFrom = bases |> List.filter (fun b -> Set.contains b interfaces |> not)
             let inheritMembers = inheritFrom |> List.map (fun b -> ExprInherit (TypType (TypeId b)))
             ExprType (TypeId ident,
@@ -279,7 +279,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         
         | BlockSyntax(_x,stmts,_) -> 
             match stmts with
-            | [] -> ExprVal (ValId "()")
+            | [] -> mkExprVal "()"
             | _ -> stmts |> Seq.map descend |> sequence
         | ReturnStatementSyntax(_,null,_) -> ExprConst (ConstId "()") |> ExprReturn
         | ReturnStatementSyntax(_,e,_) -> descend e |> ExprReturn
@@ -287,7 +287,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | ParenthesizedLambdaExpressionSyntax(_, pars, _, e) -> ExprLambda([printParamaterList [] pars |> fst], descend e)
         | AnonymousMethodExpressionSyntax(_, _, _, pars, body) -> ExprLambda ([printParamaterList [] pars |> fst], descend body)
         | InvocationExpressionSyntax(e, args) -> ExprApp (descend e, printArgumentList args)
-        | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, ExprVal (ValId <| name.ToFullString().Trim()))
+        | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, mkExprVal (name.ToFullString().Trim()))
         | ElementAccessExpressionSyntax(e, args) -> ExprItemApp (descend e, printArgumentList args)
         | BinaryExpressionSyntax(e1,SyntaxToken op,e2) -> ExprInfixApp (descend e1, ValId (operatorRewrite op), descend e2)
         | AssignmentExpressionSyntax(e1,SyntaxToken op,e2) -> 
@@ -301,8 +301,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             match op with
             | "++" -> withOp "+" "1"
             | "--" -> withOp "-" "1"
-            | "!" -> ExprApp(ExprVal(ValId "not"), descend e)
-            | "-" -> ExprApp(ExprVal(ValId "-"), descend e)
+            | "!" -> ExprApp(mkExprVal "not", descend e)
+            | "-" -> ExprApp(mkExprVal "-", descend e)
             | x -> printfn "Unknown prefix operator: %s" x; misssingCaseExpr n
         | PostfixUnaryExpressionSyntax(e,SyntaxToken op) as n ->
             //TODO: correct postfix operator sequence
@@ -316,7 +316,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let identInfo = model.GetSymbolInfo (n:SyntaxNode)
             let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text.Trim())
             let isThis = Option.attempt (fun () -> identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(text.StartsWith("this."))) |> Option.fill false
-            ExprVal <| (ValId <| (if isThis then "this." else "") +  text)
+            mkExprVal <| (if isThis then "this." else "") +  text
         | LiteralExpressionSyntax(SyntaxToken text) -> ExprConst <| ConstId text
         | ExpressionStatementSyntax(_,expr,_) -> descend expr
         | ObjectCreationExpressionSyntax(_, typ, args, init) -> 
@@ -336,11 +336,11 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | UsingStatementSyntax(_, _, decl, e, _, stmt) ->
             let binds = getVariableDeclarators decl
             binds |> Seq.map (fun (p,e) -> ExprUseBind(p, e)) |> sequence
-            |> (fun e -> ExprBind ([], PatBind(ValId "__"), [e; descend stmt] |> sequence))
+            |> (fun e -> ExprBind ([], mkPatBind "__", [e; descend stmt] |> sequence))
         | WhileStatementSyntax(_, _, e, _, stmt) ->
             ExprWhile (descend e, descend stmt)
         | ForEachStatementSyntax(_, _, typ, SyntaxToken ident, _, e, _, stmt) ->
-            ExprFor (ValId ident |> PatBind |> getTypePat (set[]) typ, descend e, descend stmt)
+            ExprFor (mkPatBind ident |> getTypePat (set[]) typ, descend e, descend stmt)
         | ForStatementSyntax(varDecl, initActions, cond, postActions, stmt) ->
             let binds = varDecl |> Option.ofObj |> Option.map getVariableDeclarators 
             let bindsExpr = binds |> Option.map (Seq.map (fun (p,e) -> ExprBind(getMutableModifier varDecl, p, e)) >> Seq.toList) |> Option.fill []
@@ -356,26 +356,25 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let getMatch = function
                 | CatchClauseSyntax (_, CatchDeclarationSyntax(_,t,tok,_), filter, block) ->
                     let exprFilter = match filter with |CatchFilterClauseSyntax(_,_,x,_) -> Some x |_ -> None
-                    let ident = let x = tok.ValueText in if String.isNullOrEmpty x then PatWildcard else ValId x |> PatBind
+                    let ident = let x = tok.ValueText in if String.isNullOrEmpty x then PatWildcard else mkPatBind x
                     ident |> getTypePat (set[]) t, exprFilter |> Option.map descend, descend block
             ExprTry(descend body, catches |> List.map getMatch, finallyBody |> Option.ofNull |> Option.map descend)
         | FinallyClauseSyntax (_,body) -> descend body
-        | ThrowStatementSyntax (_, e, _) -> ExprApp (ExprVal (ValId "raise"), descend e)
+        | ThrowStatementSyntax (_, e, _) -> ExprApp (mkExprVal "raise", descend e)
         | ArrayCreationExpressionSyntax(t, rs, InitializerExpressionSyntax([]))
         | ArrayCreationExpressionSyntax(t, rs, null) -> 
             ExprArrayInit (getType [] t, rs |> List.collect (fun r -> r.Sizes |> Seq.map descend |> Seq.toList))
         | ArrayCreationExpressionSyntax(_, _, InitializerExpressionSyntax(es)) 
         | ImplicitArrayCreationExpressionSyntax(_,_,_,InitializerExpressionSyntax(es))
         | InitializerExpressionSyntax(es) -> ExprArray(es |> List.map descend)
-        //| OmittedArraySizeExpressionSyntax _ -> ExprVal(ValId "_")
         
         | PredefinedTypeSyntax (SyntaxToken tok)
-        | ThisExpressionSyntax (SyntaxToken tok) -> ExprVal(ValId tok)
+        | ThisExpressionSyntax (SyntaxToken tok) -> mkExprVal tok
         | CastExpressionSyntax(_,t,_,e) -> ExprTypeConversion (getType [] t, descend e)
-        | TypeOfExpressionSyntax (_,_,t,_) -> ExprWithGeneric([getType [] t], ExprVal(ValId "typeof"))
+        | TypeOfExpressionSyntax (_,_,t,_) -> ExprWithGeneric([getType [] t], mkExprVal "typeof")
 
         // not supported syntax
-        | BreakStatementSyntax _ -> ExprVal(ValId "break")
+        | BreakStatementSyntax _ -> mkExprVal "break"
         
         | _ -> misssingCaseExpr node
 

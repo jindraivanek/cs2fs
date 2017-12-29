@@ -1,0 +1,4 @@
+module cs2fs.FSharpDefs
+let fsharpKeywords = 
+    ["abstract"; "and"; "as"; "assert"; "asr"; "base"; "begin"; "class"; "const"; "default"; "delegate"; "do"; "done"; "downcast"; "downto"; "elif"; "else"; "end"; "exception"; "extern"; "false"; "finally"; "fixed"; "for"; "fun"; "function"; "global"; "if"; "in"; "inherit"; "inline"; "interface"; "internal"; "land"; "lazy"; "let"; "lor"; "lsl"; "lsr"; "lxor"; "match"; "member"; "mod"; "module"; "mutable"; "namespace"; "new"; "null"; "of"; "open"; "or"; "override"; "private"; "public"; "rec"; "return"; "sig"; "static"; "struct"; "then"; "to"; "true"; "try"; "type"; "upcast"; "use"; "val"; "void"; "when"; "while"; "with"; "yield"]
+    |> set

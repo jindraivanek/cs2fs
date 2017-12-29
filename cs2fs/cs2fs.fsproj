@@ -4,18 +4,19 @@
     <TargetFramework>netcoreapp2.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="..\paket-files\kekyo\Microsoft.CodeAnalysis.ActivePatterns\Microsoft.CodeAnalysis.ActivePatterns\CSharpActivePatterns.fs">
+    <ProjectReference Include="..\paket-files\jack-pappas\ExtCore\ExtCore\ExtCore.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../paket-files/kekyo/Microsoft.CodeAnalysis.ActivePatterns/Microsoft.CodeAnalysis.ActivePatterns/CSharpActivePatterns.fs">
       <Paket>True</Paket>
       <Link>paket-files/CSharpActivePatterns.fs</Link>
     </Compile>
     <Compile Include="CSharpActivePatternsExtra.fs" />
+    <Compile Include="FSharpDefs.fs" />
     <Compile Include="Ast.fs" />
     <Compile Include="FSharpOutput.fs" />
     <Compile Include="cs2fs.fs" />
     <None Include="App.config" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\paket-files\jack-pappas\ExtCore\ExtCore\ExtCore.fsproj" />
   </ItemGroup>
   <Import Project="..\.paket\Paket.Restore.targets" />
 </Project>
