@@ -92,8 +92,9 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         let genericSet = generics |> Seq.choose (function | TypGeneric (GenericId g) -> Some g | _ -> None) |> set
         let optionalValueExpr = 
             if isNull equalsValue then None else
-                Some (ExprBind ([], ident |> mkPatBind, ExprApp (mkExprVal "defaultArg", 
-                                 ExprApp(mkExprVal ident, equalsValue.Value.ToFullString().Trim() |> ConstId |> ExprConst))))
+                ExprBind ([], ident |> mkPatBind, 
+                    ExprApp( ExprApp (mkExprVal "defaultArg", mkExprVal ident), equalsValue.Value.ToFullString().Trim() |> ConstId |> ExprConst))
+                |> Some
         let bind = mkPatBind ident 
         let bind = if isNull equalsValue then bind else match bind with |PatBind (ValId x) -> PatBind (ValId ("?"+x)) |_ -> bind
         bind |> getTypePat genericSet typ, optionalValueExpr

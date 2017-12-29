@@ -143,7 +143,7 @@ let rec getPat =
     | PatBind (ValId v) -> Text v
     | PatCons (ValId v, ps) -> Text (v + " ") |++| (ps |> Seq.map getPat |> delimText " ")
     | PatInfixCons (p1, (ValId v), p2) -> [getPat p1; Text v; getPat p2] |> delimText " " |> Paren
-    | PatTuple ts -> ts |> List.map getPat |> delimText ", " |> Paren
+    | PatTuple ts -> ts |> List.map (getPat >> removeTopParen) |> delimText ", " |> Paren
     | PatList ts -> ts |> List.map getPat |> delimSurroundText "; " "[" "]" 
     | PatRecord rows -> rows |> Seq.map (fun (FieldId f, p) -> Text (f + " = ") |++| getPat p) |> delimText "; " |> surroundText "{" "}" 
     | PatWithType (t, PatWildcard) -> Text ":? " |++| getTyp t
@@ -208,7 +208,7 @@ and getExpr =
     function
     | ExprConst (ConstId c) -> Text c
     | ExprVal (ValId v) -> Text v
-    | ExprApp (e1, e2) -> [getExpr e1 |> Paren; getExpr e2 |> Paren] |> delimText " " |> Paren
+    | ExprApp (e1, e2) -> [getExpr e1; getExpr e2 |> Paren] |> delimText " " |> Paren
     | ExprDotApp ((ExprConst _) as e1, e2) -> [getExpr e1 |> Paren; getExpr e2] |> delimText "."
     | ExprDotApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText "."
     | ExprItemApp (e1, e2) -> [getExpr e1; surroundText "[" "]" (e2 |> getExprNP)] |> delimText "."
