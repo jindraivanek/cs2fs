@@ -1,11 +1,15 @@
 module cs2fs.Main
 
+open System.Runtime.CompilerServices
 open Microsoft.CodeAnalysis
 open Microsoft.CodeAnalysis.CSharp
 open cs2fs.AST
 open cs2fs.CSharpActivePatternsExtra
 open Microsoft.CodeAnalysis.CSharp.Syntax
 open AST.Mk
+
+exception MissingCase of string
+
 let sequence xs = xs |> Seq.toList |> ExprSequence
 let (|++|) x y = ExprSequence [x;y]
     
@@ -14,6 +18,14 @@ let rec getParentOfType<'t when 't :> SyntaxNode> (node: SyntaxNode) =
     | null -> None
     | :? 't as p -> Some p
     | p -> getParentOfType p
+
+type ErrorMsg =
+    static member inline Error(msg: string, [<CallerFilePath>]?filePath: string, [<CallerLineNumber>]?line: int, [<CallerMemberName>]?memberName: string) =
+        let filePath = defaultArg filePath ""
+        let line = defaultArg line 0
+        let memberName = defaultArg memberName ""
+        let location = sprintf "at: %s:%i (%s)" filePath line memberName
+        sprintf "%s %s" msg location
 
 let missingCaseTreePrinter (n : SyntaxNode) =
     let parents = 
@@ -24,11 +36,11 @@ let missingCaseTreePrinter (n : SyntaxNode) =
         match n with
         | null -> "[!null!]"
         | _ -> 
-            "[!" + n.GetType().ToString() + "(" + (n.ChildNodes() |> Seq.map f |> String.concat "") + ")!]"
+            "[!" + n.GetType().ToString() + "!]" // + "(" + (n.ChildNodes() |> Seq.map f |> String.concat "") + ")"
     parents + " -- " + f n
 
-let misssingCaseExpr n = ExprVal (ValId <| sprintf "Missing case: %A %s" n (missingCaseTreePrinter n))
-let exceptionExpr (e:System.Exception) n = ExprVal (ValId (sprintf "Exception: %A %A %s" e e.StackTrace <| missingCaseTreePrinter n))
+let inline misssingCaseExpr n = sprintf "Missing case: %A %s" n (missingCaseTreePrinter n)
+let inline exceptionExpr (e:System.Exception) n = sprintf "Exception: %A %A %s" e e.StackTrace <| missingCaseTreePrinter n
 
 let fullName (n: ISymbol) =
     match n with
@@ -117,7 +129,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                     descend e) |> ExprTuple
             args
         | null -> ExprTuple []
-        | _ as x -> failwithf "printArgumentList: %A" x
+        | _ as n -> raise (misssingCaseExpr n |> ErrorMsg.Error |> MissingCase)
     let defInit typ = 
         //TODO: proper generic type
         ExprDefaultOf (getType [] typ)
@@ -191,7 +203,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 (function
                  | VariableDeclaratorSyntax(SyntaxToken ident, args, init) -> 
                      mkPatBind ident |> getTypePat (set[]) typ, descendOption init (defInit typ))
-        | _ -> seq [PatConst(ConstId "getVariableDeclarators"), misssingCaseExpr n] //<| "getVariableDeclarators " + missingCaseTreePrinter n
+        | _ -> raise (misssingCaseExpr n |> ErrorMsg.Error |> MissingCase)
     
     let getGenerics p =
         match p with
@@ -240,7 +252,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ) |> Seq.toList
         
         | ClassDeclarationSyntax _ as n -> [ exprF n ]
-        | _ -> failwith <| "GetMembers " + missingCaseTreePrinter n
+        | _ -> raise (misssingCaseExpr n |> ErrorMsg.Error |> MissingCase)
 
     and exprF (node: SyntaxNode) =
         match node with
@@ -266,7 +278,6 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                     |> List.map (fun b -> fst <| getTypeInfo b.Type)
                 | _ -> []
             let interfaces = bases |> List.filter (fun b -> baseT |> Option.forall (fun x -> x.Name <> b)) |> set
-            printfn "%A" interfaces
             let interfaceMembers = 
                 interfaces 
                 |> Seq.map (fun x -> ExprInterfaceImpl (TypType (TypeId (sprintf "%s" x)), mkExprVal "???")) |> Seq.toList
@@ -304,14 +315,14 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             | "--" -> withOp "-" "1"
             | "!" -> ExprApp(mkExprVal "not", descend e)
             | "-" -> ExprApp(mkExprVal "-", descend e)
-            | x -> printfn "Unknown prefix operator: %s" x; misssingCaseExpr n
+            | x -> raise (sprintf "Unknown prefix operator: %s %s" x (misssingCaseExpr n) |> ErrorMsg.Error |> MissingCase)
         | PostfixUnaryExpressionSyntax(e,SyntaxToken op) as n ->
             //TODO: correct postfix operator sequence
             let withOp o c = [ExprInfixApp (descend e, ValId "<-", ExprInfixApp (descend e, ValId o, ExprConst (ConstId c))); descend e] |> sequence
             match op with
             | "++" -> withOp "+" "1"
             | "--" -> withOp "-" "1"
-            | x -> printfn "Unknown postfix operator: %s" x; misssingCaseExpr n
+            | x -> raise (sprintf "Unknown postfix operator: %s %s" x (misssingCaseExpr n) |> ErrorMsg.Error |> MissingCase)
             
         | IdentifierNameSyntax(SyntaxToken text) as n -> 
             let identInfo = model.GetSymbolInfo (n:SyntaxNode)
@@ -322,10 +333,10 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | ExpressionStatementSyntax(_,expr,_) -> descend expr
         | ObjectCreationExpressionSyntax(_, typ, args, init) -> 
             match args, init with
-            | null, null -> misssingCaseExpr node
+            | null, null -> raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)
             | _,null -> ExprNew (getType [] typ, printArgumentList args)
             | null,_ -> ExprNew (getType [] typ, ExprTuple [descend init])
-            | _, _ -> misssingCaseExpr node
+            | _, _ -> raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)
         
         | ParenthesizedExpressionSyntax(_,e,_) -> descend e
         | LocalDeclarationStatementSyntax(isConst, varDecl, _) as n->
@@ -377,7 +388,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         // not supported syntax
         | BreakStatementSyntax _ -> mkExprVal "break"
         
-        | _ -> misssingCaseExpr node
+        | _ -> raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)
 
     try
     if tryImplicitConv then
@@ -385,8 +396,10 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             ExprTypeConversion (t, descendNoImplicit node)) 
         |> Option.fill (exprF node)
     else exprF node
-    with e -> 
-        exceptionExpr e node
+    with 
+    | MissingCase msg -> eprintfn "%s" msg; reraise()
+    | e -> 
+        failwith (exceptionExpr e node)
 
 let convert (csTree: SyntaxTree) =
     let (@@) x y = System.IO.Path.Combine(x,y)
