@@ -3,6 +3,7 @@ module cs2fs.Main
 open System.Runtime.CompilerServices
 open Microsoft.CodeAnalysis
 open Microsoft.CodeAnalysis.CSharp
+open cs2fs.Utils
 open cs2fs.AST
 open cs2fs.CSharpActivePatternsExtra
 open Microsoft.CodeAnalysis.CSharp.Syntax
@@ -288,6 +289,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             |> applyAttributes attrs
 
         | MethodDeclarationSyntax _ as n -> ExprType (TypeId "Tmp", TypeDeclClass (getModifiers node, [], PatTuple[], (getMembers [] n)))
+
+        | BaseExpressionSyntax _ -> mkExprVal "base"
         
         | BlockSyntax(_x,stmts,_) -> 
             match stmts with
@@ -300,25 +303,30 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | AnonymousMethodExpressionSyntax(_, _, _, pars, body) -> ExprLambda ([printParamaterList [] pars |> fst], descend body)
         | InvocationExpressionSyntax(e, args) -> ExprApp (descend e, printArgumentList args)
         | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (descend e, mkExprVal (name.ToFullString().Trim()))
+        | MemberBindingExpressionSyntax(_, name) -> mkExprVal (name.ToFullString().Trim())
         | ElementAccessExpressionSyntax(e, args) -> ExprItemApp (descend e, printArgumentList args)
         | BinaryExpressionSyntax(e1,SyntaxToken op,e2) -> ExprInfixApp (descend e1, ValId (operatorRewrite op), descend e2)
         | AssignmentExpressionSyntax(e1,SyntaxToken op,e2) -> 
-            let withOp o = ExprInfixApp (descend e1, ValId "<-", ExprInfixApp (descend e1, ValId o, descend e2)) 
+            let e1 = descend e1
+            let e2 = descend e2
+            let withOp o = ExprInfixApp (e1, ValId "<-", ExprInfixApp (e1, ValId o, e2)) 
             match op with
-            | "=" -> ExprInfixApp (descend e1, ValId "<-", descend e2)
+            | "=" -> ExprInfixApp (e1, ValId "<-", e2)
             | "+=" -> withOp "+" 
             | "-=" -> withOp "-" 
         | PrefixUnaryExpressionSyntax(SyntaxToken op,e) as n ->
-            let withOp o c = [ExprInfixApp (descend e, ValId "<-", ExprInfixApp (descend e, ValId o, ExprConst (ConstId c))); descend e] |> sequence
+            let e = descend e
+            let withOp o c = [ExprInfixApp (e, ValId "<-", ExprInfixApp (e, ValId o, ExprConst (ConstId c))); e] |> sequence
             match op with
             | "++" -> withOp "+" "1"
             | "--" -> withOp "-" "1"
-            | "!" -> ExprApp(mkExprVal "not", descend e)
-            | "-" -> ExprApp(mkExprVal "-", descend e)
+            | "!" -> ExprApp(mkExprVal "not", e)
+            | "-" -> ExprApp(mkExprVal "-", e)
             | x -> raise (sprintf "Unknown prefix operator: %s %s" x (misssingCaseExpr n) |> ErrorMsg.Error |> MissingCase)
         | PostfixUnaryExpressionSyntax(e,SyntaxToken op) as n ->
             //TODO: correct postfix operator sequence
-            let withOp o c = [ExprInfixApp (descend e, ValId "<-", ExprInfixApp (descend e, ValId o, ExprConst (ConstId c))); descend e] |> sequence
+            let e = descend e
+            let withOp o c = [ExprInfixApp (e, ValId "<-", ExprInfixApp (e, ValId o, ExprConst (ConstId c))); e] |> sequence
             match op with
             | "++" -> withOp "+" "1"
             | "--" -> withOp "-" "1"
@@ -364,6 +372,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | ElseClauseSyntax(_,e) -> descend e
         | ConditionalExpressionSyntax(e1, _, e2, _, e3) ->
             ExprIf(descend e1, descend e2, Some (descend e3))
+        | ConditionalAccessExpressionSyntax(e1, _, e2) -> 
+            ExprInfixApp(descend e1, ValId "?.", descend e2)
         | TryStatementSyntax (_, body, catches, finallyBody) -> 
             let getMatch = function
                 | CatchClauseSyntax (_, CatchDeclarationSyntax(_,t,tok,_), filter, block) ->
@@ -385,8 +395,19 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | CastExpressionSyntax(_,t,_,e) -> ExprTypeConversion (getType [] t, descend e)
         | TypeOfExpressionSyntax (_,_,t,_) -> ExprWithGeneric([getType [] t], mkExprVal "typeof")
 
+        | SwitchStatementSyntax(_,_, e, _, _, cases, _) ->
+            let matches = 
+                cases |> List.collect (fun (SwitchSectionSyntax(labels, stmts)) -> 
+                    labels |> List.map (function 
+                        | :? CaseSwitchLabelSyntax as l -> l.Value.ToString().Trim()
+                        | :? DefaultSwitchLabelSyntax -> "_")
+                    |> List.map (fun x -> x |> mkPatBind, None, stmts |> List.map descend |> sequence)
+                )
+            ExprMatch (descend e, matches)
+
         // not supported syntax
         | BreakStatementSyntax _ -> mkExprVal "break"
+        | ContinueStatementSyntax _ -> mkExprVal "continue"
         
         | _ -> raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)
 
@@ -394,7 +415,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
     if tryImplicitConv then
         implicitConv node |> Option.map (fun t -> 
             ExprTypeConversion (t, descendNoImplicit node)) 
-        |> Option.fill (exprF node)
+        |> Option.fillWith (fun () -> exprF node)
     else exprF node
     with 
     | MissingCase msg -> eprintfn "%s" msg; reraise()
@@ -411,6 +432,7 @@ let convert (csTree: SyntaxTree) =
 
 [<EntryPoint>]
 let main argv =
+    eprintfn "Converting: %s" argv.[0]
     let tree = CSharpSyntaxTree.ParseText(System.IO.File.ReadAllText argv.[0])
     let expr = tree |> convert |> Program
     let blockExpr = expr |> cs2fs.FSharpOutput.toFs

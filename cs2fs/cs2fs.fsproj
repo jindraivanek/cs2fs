@@ -11,6 +11,7 @@
       <Paket>True</Paket>
       <Link>paket-files/CSharpActivePatterns.fs</Link>
     </Compile>
+    <Compile Include="Utils.fs" />
     <Compile Include="CSharpActivePatternsExtra.fs" />
     <Compile Include="FSharpDefs.fs" />
     <Compile Include="Ast.fs" />

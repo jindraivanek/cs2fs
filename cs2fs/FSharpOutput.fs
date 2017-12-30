@@ -306,7 +306,7 @@ and getExprNP e = getExpr e |> removeTopParen
 and getExprMNP e = getExprM e |> removeTopParen
 
 let toFs (Program e) =
-    printfn "%A" e
+    //printfn "%A" e
     let e =
         e 
         |> cs2fs.AST.Transforms.simplify 
