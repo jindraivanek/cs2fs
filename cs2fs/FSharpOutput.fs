@@ -185,9 +185,9 @@ and getMember className x =
         |++| (thisVal |> Option.map (fun (ValId x) -> Text(x + ".")) |> Option.fill (Text "")) |++| Text v
         |++| getGenerics generics |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
     | ExprMemberConstructor (modifiers, args, expr) -> 
-        let init = ExprBind ([], PatBind (ValId "this"), ExprApp (ExprVal (ValId className), ExprTuple []))
+        let init = ExprApp (ExprVal (ValId className), ExprTuple [])
         getModifiersOfGroup 1 modifiers |++| getModifiersOfGroup 2 modifiers |++| Text "new"
-        |++| getPat args |++| Text " = " |++| Line |+>| getExpr (ExprSequence [init; expr; ExprVal (ValId "this")])
+        |++| getPat args |++| Text " as this = " |++| Line |+>| (getExpr init |++| Line |++| Text "then" |++| Line |+>| getExpr expr)
     | ExprMemberProperty (pat, init, getter) -> property pat init getter (false, None)
     | ExprMemberPropertyWithSet (pat, init, getter, setter) -> property pat init getter (true, setter)
     | ExprInterfaceImpl (t, e) -> Text "interface " |++| getTyp t |++| Text " with" |++| Line |+>| getExpr e
