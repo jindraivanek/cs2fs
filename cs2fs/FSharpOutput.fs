@@ -109,12 +109,14 @@ let getModifier =
     | Private -> Text "private"
     | Static -> Text "static"
     | Mutable -> Text "mutable"
+    | Override -> Text "override"
     
 let getModifierGroup =
     function
     | Private -> 2
     | Static
-    | Mutable -> 1
+    | Mutable 
+    | Override -> 1
 
 let getModifiersOfGroup rank ms = 
     ms |> Seq.filter (fun x -> getModifierGroup x = rank) 
@@ -122,7 +124,7 @@ let getModifiersOfGroup rank ms =
 
 let getModifiers ms = [1..2] |> Seq.map (fun r -> getModifiersOfGroup r ms) |> block 
 
-
+let haveModifier (m: Modifier) ms = ms |> Seq.contains m
 let rec getTyp =
     function
     | TypType (TypeId x) -> Text x
@@ -181,7 +183,7 @@ and getMember className x =
         header |++| getterText |++| (if haveSetter then setterText else Text "")
     match x with
     | ExprMember (ValId v, generics, modifiers, thisVal, args, expr) -> 
-        getModifiersOfGroup 1 modifiers |++| Text "member " |++| getModifiersOfGroup 2 modifiers 
+        getModifiersOfGroup 1 modifiers |++| Text (if haveModifier Override modifiers then "" else "member ") |++| getModifiersOfGroup 2 modifiers 
         |++| (thisVal |> Option.map (fun (ValId x) -> Text(x + ".")) |> Option.fill (Text "")) |++| Text v
         |++| getGenerics generics |++| getPat args |++| Text " = " |++| Line |+>| getExpr expr
     | ExprMemberConstructor (modifiers, args, expr) -> 

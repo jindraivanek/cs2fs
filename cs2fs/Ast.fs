@@ -13,6 +13,7 @@ type Modifier =
 | Private
 | Static
 | Mutable
+| Override
 
 // type abbrevation, type definition in Decl module
 type Typ =

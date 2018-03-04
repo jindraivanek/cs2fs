@@ -148,6 +148,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             hasModifier "private", Private
             hasModifier "static", Static
             hasModifier "readonly" >> not, Mutable
+            hasModifier "override", Override
         ] |> List.choose (fun (f,m) -> Option.conditional (f n) m)
     let getModifiers n = getModifiersAll n |> List.filter ((<>) Mutable)
     let getMutableModifier n = getModifiersAll n |> List.filter ((=) Mutable)
