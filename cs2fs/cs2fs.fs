@@ -333,6 +333,18 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             | "--" -> withOp "-" "1"
             | x -> raise (sprintf "Unknown postfix operator: %s %s" x (misssingCaseExpr n) |> ErrorMsg.Error |> MissingCase)
             
+        | InterpolatedStringExpressionSyntax(_, xs, _) as n -> 
+            let parts = 
+                xs |> Seq.map (function
+                    | :? InterpolatedStringTextSyntax as x -> x.TextToken.Text, None
+                    | :? InterpolationSyntax as x -> 
+                        //TODO: correct handling of FormatClause - use String.Format?
+                        "%O" + (if isNull x.FormatClause then "" else ":" + (x.FormatClause.ToString())), Some x.Expression
+                    ) |> Seq.cache
+            let formatString = parts |> Seq.map fst |> String.concat ""
+            let exprs = parts |> Seq.choose snd
+            exprs |> Seq.fold (fun e x -> ExprApp(e, descend x)) (mkExprVal <| "sprintf \"" + formatString + "\"")
+        
         | IdentifierNameSyntax(SyntaxToken text) as n -> 
             let identInfo = model.GetSymbolInfo (n:SyntaxNode)
             let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text.Trim())
@@ -354,6 +366,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         
         | EqualsValueClauseSyntax(_, value) -> descend value
         
+        | LockStatementSyntax(_, _, e, _, stmt) -> ExprApp (mkExprVal "lock", ExprApp (descend e, ExprLambda ([PatTuple []], descend stmt)))
         | UsingStatementSyntax(_, _, decl, e, _, stmt) ->
             let binds = getVariableDeclarators decl
             binds |> Seq.map (fun (p,e) -> ExprUseBind(p, e)) |> sequence
