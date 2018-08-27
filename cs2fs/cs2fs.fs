@@ -366,7 +366,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         
         | EqualsValueClauseSyntax(_, value) -> descend value
         
-        | LockStatementSyntax(_, _, e, _, stmt) -> ExprApp (mkExprVal "lock", ExprApp (descend e, ExprLambda ([PatTuple []], descend stmt)))
+        | LockStatementSyntax(_, _, e, _, stmt) -> ExprApp (ExprApp (mkExprVal "lock", descend e), ExprLambda ([PatTuple []], descend stmt))
         | UsingStatementSyntax(_, _, decl, e, _, stmt) ->
             let binds = getVariableDeclarators decl
             binds |> Seq.map (fun (p,e) -> ExprUseBind(p, e)) |> sequence
