@@ -211,7 +211,9 @@ and getExpr =
     | ExprConst (ConstId c) -> Text c
     | ExprVal (ValId v) -> Text v
     | ExprApp (e1, e2) -> [getExpr e1; getExpr e2 |> Paren] |> delimText " " |> Paren
-    | ExprDotApp ((ExprConst _) as e1, e2) -> [getExpr e1 |> Paren; getExpr e2] |> delimText "."
+    | ExprDotApp ((ExprConst _) as e1, e2) 
+    | ExprDotApp ((ExprNew _) as e1, e2) 
+        -> [getExpr e1 |> Paren; getExpr e2] |> delimText "."
     | ExprDotApp (e1, e2) -> [getExpr e1; getExpr e2] |> delimText "."
     | ExprItemApp (e1, e2) -> [getExpr e1; surroundText "[" "]" (e2 |> getExprNP)] |> delimText "."
     | ExprInfixApp (e1, ValId v, e2) -> [getExprMNP e1; Text v; getExprMNP e2] |> delimText " " |> Paren
