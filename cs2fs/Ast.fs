@@ -339,6 +339,7 @@ module rec Transforms =
         | ExprConst (ConstId "null") -> 
             ExprConst (ConstId "Unchecked.defaultof<_>") |> Some
         | ExprInfixApp (e1, ValId "as" , e2) -> ExprInfixApp (e1, ValId ":?>" , e2) |> Some
+        | ExprInfixApp (e1, ValId "is" , e2) -> ExprInfixApp (e1, ValId ":?" , e2) |> Some
         | _ -> None
         |> exprMap
 
