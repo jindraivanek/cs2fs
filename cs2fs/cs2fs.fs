@@ -66,7 +66,9 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             fullName t, (gs |> Option.condition (List.isEmpty >> not))
         | :? ITypeParameterSymbol as x -> x.Name, None
         | :? IArrayTypeSymbol as x -> x.ToDisplayString(), None
-        | _ -> fullName t, None
+        | _ -> 
+            let name = let x = fullName t in if x = "" then "obj" else x
+            name, None
     let getTypeInfo (n: SyntaxNode) = getTypeInfoFromType (model.GetTypeInfo(n).Type) 
         
     let rec getType (genericSet: #seq<_>) (n:Syntax.TypeSyntax) =  
