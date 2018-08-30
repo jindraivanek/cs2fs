@@ -395,7 +395,11 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
                 | CatchClauseSyntax (_, CatchDeclarationSyntax(_,t,tok,_), filter, block) ->
                     let exprFilter = match filter with |CatchFilterClauseSyntax(_,_,x,_) -> Some x |_ -> None
                     let ident = let x = tok.ValueText in if String.isNullOrEmpty x then PatWildcard else mkPatBind x
-                    ident |> getTypePat (set[]) t, exprFilter |> Option.map descend, descend block
+                    let typeCheckPat = function 
+                        | PatWithType(t, PatWildcard) -> PatWithType(t, PatWildcard)
+                        | PatWithType(t, PatBind x) -> PatBindAs(x, PatWithType(t, PatWildcard))
+                        | x -> failwithf "Unexpected case %A" x
+                    ident |> getTypePat (set[]) t |> typeCheckPat, exprFilter |> Option.map descend, descend block
             ExprTry(descend body, catches |> List.map getMatch, finallyBody |> Option.ofNull |> Option.map descend)
         | FinallyClauseSyntax (_,body) -> descend body
         | ThrowStatementSyntax (_, e, _) -> ExprApp (mkExprVal "raise", descend e)
