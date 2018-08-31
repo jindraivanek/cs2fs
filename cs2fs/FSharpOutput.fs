@@ -46,6 +46,7 @@ let printBlock block =
             if List.length bs <> List.length bs' then bs' |> Block |> simplify  else bs' |> Block 
         | Paren (Paren b) 
         | Paren b -> b |> simplify |> Paren 
+        | IndentBlock (Paren b)
         | IndentBlock b -> simplify b |> IndentBlock
         | x -> x
     let parenStart = Text "("
@@ -210,7 +211,7 @@ and getExpr =
     function
     | ExprConst (ConstId c) -> Text c
     | ExprVal (ValId v) -> Text v
-    | ExprApp (e1, e2) -> [getExpr e1; getExpr e2 |> Paren] |> delimText " " |> Paren
+    | ExprApp (e1, e2) -> [getExpr e1; getExprMP e2] |> delimText " " |> Paren
     | ExprDotApp ((ExprConst _) as e1, e2) 
     | ExprDotApp ((ExprNew _) as e1, e2) 
         -> [getExpr e1 |> Paren; getExpr e2] |> delimText "."
@@ -324,4 +325,6 @@ let toFs (Program e) =
         |> cs2fs.AST.Transforms.constReplacement
         |> cs2fs.AST.Transforms.removeUnnecessaryTypeConversion
     //printfn "%A" e
-    e |> getExpr
+    let b = e |> getExpr
+    //printfn "%A" b
+    b
