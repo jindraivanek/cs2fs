@@ -456,7 +456,7 @@ let main argv =
     let tree = CSharpSyntaxTree.ParseText(System.IO.File.ReadAllText argv.[0])
     let expr = tree |> convert |> Program
     let blockExpr = expr |> cs2fs.FSharpOutput.toFs
-    let output = blockExpr |> cs2fs.FSharpOutput.printBlock
+    let output = blockExpr |> cs2fs.FSharpOutput.P.printBlock
     //expr |> (printfn "%A")
     //printfn "==========="
     if argv.Length > 1 then
