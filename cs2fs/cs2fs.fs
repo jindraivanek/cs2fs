@@ -1,4 +1,4 @@
-module cs2fs.Main
+module cs2fs.Convert
 
 open System.Runtime.CompilerServices
 open Microsoft.CodeAnalysis
@@ -429,7 +429,9 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
         | BreakStatementSyntax _ -> mkExprVal "break"
         | ContinueStatementSyntax _ -> mkExprVal "continue"
         
-        | _ -> raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)
+        | _ ->
+            mkExprVal (sprintf "// UNKNOWN(%A)"  (misssingCaseExpr node |> ErrorMsg.Error))
+            //raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)
 
     try
     if tryImplicitConv then
@@ -450,16 +452,10 @@ let convert (csTree: SyntaxTree) =
     let model = compilation.GetSemanticModel(csTree, true)
     csTree.GetRoot() |> convertNode true model
 
-[<EntryPoint>]
-let main argv =
-    eprintfn "Converting: %s" argv.[0]
-    let tree = CSharpSyntaxTree.ParseText(System.IO.File.ReadAllText argv.[0])
+let convertText (csharp:string) =
+    let tree = CSharpSyntaxTree.ParseText(csharp)
     let expr = tree |> convert |> Program
     let blockExpr = expr |> cs2fs.FSharpOutput.toFs
     let output = blockExpr |> cs2fs.FSharpOutput.printBlock
-    //expr |> (printfn "%A")
-    //printfn "==========="
-    if argv.Length > 1 then
-        System.IO.File.WriteAllText(argv.[1], output) 
-    output |> (printfn "%s")
-    0 // return an integer exit code
+
+    output
