@@ -456,8 +456,8 @@ let convert (csTree: SyntaxTree) =
 let convertText (csharp:string) =
     let tree = CSharpSyntaxTree.ParseText(csharp)
     let expr = tree |> convert |> Program
-    expr |> (printfn "%A")
-    printfn "==========="
+    // expr |> (printfn "%A")
+    // printfn "==========="
     let blockExpr = expr |> cs2fs.FSharpOutput.toFs
     let output = blockExpr |> cs2fs.FSharpOutput.printBlock
 
