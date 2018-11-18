@@ -351,7 +351,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) =
             let identInfo = model.GetSymbolInfo (n:SyntaxNode)
             let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text.Trim())
             let isThis = Option.attempt (fun () -> identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(text.StartsWith("this."))) |> Option.fill false
-            mkExprVal <| (if isThis then "this." else "") +  text
+            let prefix = if isThis then (if identInfo.Symbol.IsStatic then thisClassName+"." else "this.") else ""
+            mkExprVal <| prefix +  text
         | LiteralExpressionSyntax(SyntaxToken text) -> ExprConst <| ConstId text
         | ExpressionStatementSyntax(_,expr,_) -> descend expr
         | ObjectCreationExpressionSyntax(_, typ, args, init) -> 
@@ -455,6 +456,8 @@ let convert (csTree: SyntaxTree) =
 let convertText (csharp:string) =
     let tree = CSharpSyntaxTree.ParseText(csharp)
     let expr = tree |> convert |> Program
+    expr |> (printfn "%A")
+    printfn "==========="
     let blockExpr = expr |> cs2fs.FSharpOutput.toFs
     let output = blockExpr |> cs2fs.FSharpOutput.printBlock
 
