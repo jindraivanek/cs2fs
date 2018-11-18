@@ -278,8 +278,12 @@ module rec Transforms =
         function
         | (ExprType (TypeId mainClass, TypeDeclClass (_, _, _, members))) as e ->
             members |> Seq.choose isMainMember |> Seq.tryHead |> Option.map (fun callArgs -> 
+                let callArgsVal = function
+                    | ExprVal (ValId x) -> ValId x
+                    | _ -> ValId "args"
+                let callArgsPat = callArgs |> List.map (callArgsVal >> PatBind)
                 let mainCall = ExprApp (ExprDotApp (ExprVal (ValId mainClass), ExprVal (ValId "Main")), ExprTuple callArgs)
-                let mainBind = ExprAttribute([AttributeId "EntryPoint"], ExprBind ([], PatCons (ValId "main", [PatBind (ValId "args")]), ExprSequence [mainCall; ExprConst (ConstId "0")]))
+                let mainBind = ExprAttribute([AttributeId "EntryPoint"], ExprBind ([], PatCons (ValId "main", callArgsPat), ExprSequence [mainCall; ExprConst (ConstId "0")]))
                 Some <| ExprSequence [e; ExprModule (ModuleId (mainClass + "__run"), mainBind)]
             ) |> Option.fill None
         | _ -> None
