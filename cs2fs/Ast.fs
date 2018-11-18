@@ -270,7 +270,9 @@ module rec Transforms =
     let entryPoint =
         let isMainMember =
             function
-            | ExprMember (ValId "Main", [], [Static], None, PatTuple [PatWithType(TypType (TypeId "string[]"), PatBind (ValId args))], _) -> Some [ExprVal (ValId args)]
+            | ExprMember (ValId "Main", [], [Static], None, PatTuple [PatWithType(TypType (TypeId t), PatBind (ValId args))], _) 
+                when t = "string[]" || t = "String[]" -> 
+                    Some [ExprVal (ValId args)]
             | ExprMember (ValId "Main", [], [Static], None, PatTuple [], _) -> Some []
             | _ -> None
         function
