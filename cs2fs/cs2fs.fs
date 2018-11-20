@@ -52,10 +52,42 @@ let fullName (n: ISymbol) =
         else ""
     f n + n.Name
 
-type ConversionResults =
-    { Warnings : string list }
+type ErrorType =
+    | UnknownAssignmentOperator of string
+    | UnknownPrefixOperator of string
+    | UnknownPostfixOperator of string
+    | BreakNotSupported
+    | ContinueNotSupported
+    | UnknownNode
 
-let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : Expr<SyntaxNode> =
+type ConvertError =
+    { ProblematicNode : SyntaxNode
+      Type : ErrorType }
+
+type ConvertResults =
+    { Warnings : string list
+      Errors : ConvertError list }
+    static member Empty = { Warnings = []; Errors = [] }
+
+let createError node tp = { ProblematicNode = node; Type = tp }
+let addError res e = { res with Errors = e :: res.Errors }
+let fromError e = { ConvertResults.Empty with Errors = [ e ] }
+
+let unknownNode n = ErrorType.UnknownNode |> createError n |> fromError, Mk.mkError n
+
+let combineResults (r1:ConvertResults) (r2:ConvertResults) =
+    { Warnings = r1.Warnings @ r2.Warnings
+      Errors = r1.Errors @ r2.Errors }
+
+let collectResults (s: seq<ConvertResults>) =
+    Seq.fold combineResults ConvertResults.Empty s
+    
+let sequenceTree ctx (xs : seq<ConvertResults * Expr<'a>>) =
+    let t = xs |> Seq.toList
+    let nodes = t |> Seq.map snd
+    t |> Seq.map fst |> collectResults, nodes |> sequence ctx
+
+let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : ConvertResults * Expr<SyntaxNode>=
     let descend n = convertNode true model n
     let descendOption n def = defaultArg (n |> Option.map (convertNode true model)) def
     let descendToOption n = n |> Option.map (convertNode true model)
@@ -132,12 +164,14 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             let args = 
                 args |> List.map (fun (ArgumentSyntax(_, refOrOut, e)) -> 
                     descend e)
-            ExprTuple(n, args)
-        | null -> ExprTuple (n, [])
-        | _ as n -> raise (misssingCaseExpr n |> ErrorMsg.Error |> MissingCase)
+            args |> Seq.map fst |> collectResults,                
+            ExprTuple(n, args |> List.map snd)
+        | null -> ConvertResults.Empty, ExprTuple (n, [])
+        | _ as n -> unknownNode n
+        // raise (misssingCaseExpr n |> ErrorMsg.Error |> MissingCase)
     let defInit typ = 
         //TODO: proper generic type
-        ExprDefaultOf (typ :> SyntaxNode, getType [] typ)
+        ConvertResults.Empty, ExprDefaultOf (typ :> SyntaxNode, getType [] typ)
     
     let getTextModifiers (n:SyntaxNode) =
         match n with
@@ -201,17 +235,22 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         |> Seq.collect (fun (a: Syntax.AttributeListSyntax) -> a.Attributes |> Seq.map (fun x -> x :> SyntaxNode, AttributeId <| x.Name.ToFullString().Trim()))
         |> Seq.toList
         |> Option.conditional (List.isEmpty attrs |> not)
-    let applyAttributes (attrs) (e:Expr<'a>) =
+    let applyAttributes (attrs) (e:Expr<'a>) : Expr<'a> =
         getAttributes attrs |> Option.map (fun l -> ExprAttribute (e.Context, l |> List.map snd, e)) |> Option.fill e
 
     let getVariableDeclarators n = 
         match n with
         | VariableDeclarationSyntax(typ, vars) ->
-            vars |> Seq.map
-                (function
-                 | VariableDeclaratorSyntax(SyntaxToken ident, args, init) as var -> 
-                     mkPatBind (var:>SyntaxNode) ident |> getTypePat (set[]) typ, descendOption init (defInit typ))
-        | _ -> raise (misssingCaseExpr n |> ErrorMsg.Error |> MissingCase)
+            let results = 
+                vars |> List.map
+                    (function
+                     | VariableDeclaratorSyntax(SyntaxToken ident, args, init) as var ->
+                        let res, o = descendOption init (defInit typ)
+                        res, mkPatBind (var:>SyntaxNode) ident |> getTypePat (set[]) typ, o)
+            results             
+        | _ -> 
+            let res, n = unknownNode n //raise (misssingCaseExpr n |> ErrorMsg.Error |> MissingCase)
+            [ res, mkPatBind node "ERROR", n ]
     
     let getGenerics p =
         match p with
@@ -225,18 +264,24 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,SyntaxToken ident,typePars,parsIn,typeParsConstrs,block,arrowExpr,_) as n -> 
             let gs = getGenerics typePars
             let (pars, optionalParExprs) = printParamaterList (classGenerics @ gs) parsIn
+            let blockRes, block = descend block
+
+            blockRes,
             [ 
-                ExprMember (n, ValId ident, gs, getModifiers n, thisIfNotStatic n, pars, descend block |> fun b -> ExprSequence(parsIn :> SyntaxNode, optionalParExprs @ [b])) 
+                ExprMember (n, ValId ident, gs, getModifiers n, thisIfNotStatic n, pars, block |> fun b -> ExprSequence(parsIn :> SyntaxNode, optionalParExprs @ [b])) 
                     |> applyAttributes attrs 
             ]
             
         | ConstructorDeclarationSyntax (attrs,_,parsIn,init,block,_) ->
             match getParameters parsIn with
-            | [] -> []
+            | [] -> ConvertResults.Empty, []
             | _ ->
             let (pars, optionalParExprs) = printParamaterList (classGenerics) parsIn
+            let blockRes, block = descend block
+
+            blockRes,
             [ 
-                ExprMemberConstructor (n, getModifiers n, pars, descend block |> fun b -> ExprSequence(parsIn :> SyntaxNode, optionalParExprs @ [b])) 
+                ExprMemberConstructor (n, getModifiers n, pars, block |> fun b -> ExprSequence(parsIn :> SyntaxNode, optionalParExprs @ [b])) 
                     |> applyAttributes attrs 
             ]
         
@@ -244,37 +289,55 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             let accs = 
                 accessors |> List.map (fun (AccessorDeclarationSyntax(attrs, SyntaxToken keyword, block, _)) ->
                     keyword, Option.ofObj block)
-            let (propPat, init) = mkPatBind n ident |> getTypePat (set[]) typ, defInit typ
+            let (propPat, (r, init)) = mkPatBind n ident |> getTypePat (set[]) typ, defInit typ
+            
             match accs with
-            | [] -> []
-            | ["get", getBlock] -> [ExprMemberProperty (n, propPat, init, descendToOption getBlock) |> applyAttributes attrs]
-            | ["get", getBlock; "set", setBlock] -> [ExprMemberPropertyWithSet (n, propPat, init, descendToOption getBlock, descendToOption setBlock) |> applyAttributes attrs]
+            | [] -> ConvertResults.Empty, []
+            | ["get", getBlock] -> 
+                let getBlockO = descendToOption getBlock
+                getBlockO |> Option.map fst |> Option.fill ConvertResults.Empty |> combineResults r,
+                [ExprMemberProperty (n, propPat, init, getBlockO |> Option.map snd) |> applyAttributes attrs]
+            | ["get", getBlock; "set", setBlock] -> 
+                let getBlockO = descendToOption getBlock
+                let setBlockO = descendToOption setBlock
+
+                [ yield getBlockO |> Option.map fst; yield setBlockO |> Option.map fst; yield Some r ] |> Seq.choose id |> collectResults,
+                [ExprMemberPropertyWithSet (n, propPat, init, getBlockO |> Option.map snd, setBlockO |> Option.map snd) |> applyAttributes attrs]
             
         | FieldDeclarationSyntax(attrs,varDecl,_) as n -> 
             let binds = getVariableDeclarators varDecl
-            binds |> Seq.map (fun (p,e) ->
-                if hasModifier "readonly" n then
-                    ExprMemberProperty (varDecl:>SyntaxNode, p, e, None)
-                else ExprMemberPropertyWithSet (varDecl:>SyntaxNode, p, e, None, None)
-                 |> applyAttributes attrs
-            ) |> Seq.toList
+            let results =
+                binds |> Seq.map (fun (r, p, e) ->
+                    r, 
+                    if hasModifier "readonly" n then
+                        ExprMemberProperty (varDecl:>SyntaxNode, p, e, None)
+                    else ExprMemberPropertyWithSet (varDecl:>SyntaxNode, p, e, None, None)
+                     |> applyAttributes attrs
+                ) |> Seq.toList
+            results |> List.map fst |> collectResults,
+            results |> List.map snd           
         
-        | ClassDeclarationSyntax _ as n -> [ exprF n ]
-        | _ -> raise (misssingCaseExpr n |> ErrorMsg.Error |> MissingCase)
+        | ClassDeclarationSyntax _ as n -> let res, e = exprF n in res, [ e ]
+        | _ -> let r, e = unknownNode n in r, [ e ]
 
-    and exprF (node: SyntaxNode) =
+    and exprF (node: SyntaxNode) : ConvertResults * Expr<SyntaxNode> =
         match node with
         | CompilationUnitSyntax(aliases, usings, attrs, members, _) ->
-            [  (usings |> Seq.map descend |> sequence node)
-               (members |> Seq.map descend |> sequence node) ]
-            |> sequence node                   
+            let results1, uses = usings |> Seq.map descend |> sequenceTree node
+            let results2, mems = members |> Seq.map descend |> sequenceTree node
+
+            combineResults results1 results2,
+            [  uses; mems ] |> sequence node
             |> applyAttributes attrs
         | UsingDirectiveSyntax(_, staticKeyword, alias, name, _) ->
+            ConvertResults.Empty,
             Expr.ExprInclude (node, ModuleId <| name.ToFullString().Trim())
         | NamespaceDeclarationSyntax(keyword, name, _, externs, usings, members, _, _) ->
-            ExprNamespace (node, NamespaceId <| name.ToString(),
-                [ (usings |> Seq.map descend |> sequence node)
-                  (members |> Seq.map descend |> sequence node) ] |> sequence node)
+            let results1, usings = usings |> Seq.map descend |> sequenceTree node
+            let results2, members = members |> Seq.map descend |> sequenceTree node
+        
+            combineResults results1 results2,
+            ExprNamespace (node, NamespaceId <| name.ToString(), [ usings; members ] |> sequence node)
         | ClassDeclarationSyntax(attrs,keyword,SyntaxToken ident,typePars, basesIn,constrs,_,members,_,_) as n ->
             let c = n :?> Syntax.ClassDeclarationSyntax
             let s = model.GetDeclaredSymbol(c)
@@ -292,53 +355,76 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
                 |> Seq.map (fun x -> ExprInterfaceImpl (n, TypType (TypeId (sprintf "%s" x)), mkExprVal n "???")) |> Seq.toList
             let inheritFrom = bases |> List.filter (fun b -> Set.contains b interfaces |> not)
             let inheritMembers = inheritFrom |> List.map (fun b -> ExprInherit (basesIn :> SyntaxNode, TypType (TypeId b)))
+            
+            let members = members |> List.map (getMembers gs)
+
+            members |> Seq.map fst |> collectResults,
             ExprType (n, TypeId ident,
-                TypeDeclClass (n, getModifiers node, gs, PatTuple(n, []), inheritMembers @ (members |> List.collect (getMembers gs)) @ interfaceMembers))
+                TypeDeclClass (n, getModifiers node, gs, PatTuple(n, []), inheritMembers @ (members |> List.collect snd) @ interfaceMembers))
             |> applyAttributes attrs
 
-        | MethodDeclarationSyntax _ as n -> ExprType (n, TypeId "Tmp", TypeDeclClass (n, getModifiers node, [], PatTuple(n, []), (getMembers [] n)))
+        | MethodDeclarationSyntax _ as n -> 
+            let results, members = getMembers [] n
+            results,
+            ExprType (n, TypeId "Tmp", TypeDeclClass (n, getModifiers node, [], PatTuple(n, []), members))
 
-        | BaseExpressionSyntax _  -> mkExprVal node "base"
+        | BaseExpressionSyntax _  -> ConvertResults.Empty, mkExprVal node "base"
         
         | BlockSyntax(_x,stmts,_) -> 
             match stmts with
-            | [] -> mkExprVal node "()"
-            | _ -> stmts |> Seq.map descend |> sequence node
-        | ReturnStatementSyntax(_,null,_) -> ExprReturn(node, ExprConst (node, ConstId "()")) 
-        | ReturnStatementSyntax(_,e,_) -> ExprReturn(node, descend e) 
-        | SimpleLambdaExpressionSyntax(_, par, _, e) -> ExprLambda(node, [getParameterSyntax [] par |> fst], descend e)
-        | ParenthesizedLambdaExpressionSyntax(_, pars, _, e) -> ExprLambda(node, [printParamaterList [] pars |> fst], descend e)
-        | AnonymousMethodExpressionSyntax(_, _, _, pars, body) -> ExprLambda (node, [printParamaterList [] pars |> fst], descend body)
-        | InvocationExpressionSyntax(e, args) -> ExprApp (node, descend e, printArgumentList args)
-        | MemberAccessExpressionSyntax(e, _, name) -> ExprDotApp (node, descend e, mkExprVal (name:>SyntaxNode) (name.ToFullString().Trim()))
-        | MemberBindingExpressionSyntax(_, name) -> mkExprVal node (name.ToFullString().Trim())
-        | ElementAccessExpressionSyntax(e, args) -> ExprItemApp (node, descend e, printArgumentList args)
-        | BinaryExpressionSyntax(e1,SyntaxToken op,e2) -> ExprInfixApp (node, descend e1, ValId (operatorRewrite op), descend e2)
+            | [] -> ConvertResults.Empty, mkExprVal node "()"
+            | _ -> stmts |> Seq.map descend |> sequenceTree node
+        | ReturnStatementSyntax(_,null,_) -> ConvertResults.Empty, ExprReturn(node, ExprConst (node, ConstId "()")) 
+        | ReturnStatementSyntax(_,e,_) -> let res, desc = descend e in res, ExprReturn(node, desc) 
+        | SimpleLambdaExpressionSyntax(_, par, _, e) -> let res, desc = descend e in res, ExprLambda(node, [getParameterSyntax [] par |> fst], desc)
+        | ParenthesizedLambdaExpressionSyntax(_, pars, _, e) -> let res, desc = descend e in res, ExprLambda(node, [printParamaterList [] pars |> fst], desc)
+        | AnonymousMethodExpressionSyntax(_, _, _, pars, body) -> let res, desc = descend body in res, ExprLambda (node, [printParamaterList [] pars |> fst], desc)
+        | InvocationExpressionSyntax(e, args) -> 
+            let res, desc = descend e 
+            let res2, args = printArgumentList (args :> SyntaxNode)
+            combineResults res res2, ExprApp (node, desc, args)
+        | MemberAccessExpressionSyntax(e, _, name) -> let res, desc = descend e in res, ExprDotApp (node, desc, mkExprVal (name:>SyntaxNode) (name.ToFullString().Trim()))
+        | MemberBindingExpressionSyntax(_, name) -> ConvertResults.Empty, mkExprVal node (name.ToFullString().Trim())
+        | ElementAccessExpressionSyntax(e, args) ->
+            let res, desc = descend e
+            let res2, args = printArgumentList (args :> SyntaxNode)
+            
+            combineResults res res2, ExprItemApp (node, desc, args)
+        | BinaryExpressionSyntax(e1,SyntaxToken op,e2) ->
+            let res1, desc1 = descend e1
+            let res2, desc2 = descend e2
+            
+            combineResults res1 res2, ExprInfixApp (node, desc1, ValId (operatorRewrite op), desc2)
         | AssignmentExpressionSyntax(e1,SyntaxToken op,e2) -> 
-            let e1 = descend e1
-            let e2 = descend e2
-            let withOp o = ExprInfixApp (node, e1, ValId "<-", ExprInfixApp (node, e1, ValId o, e2)) 
+            let res1, e1 = descend e1
+            let res2, e2 = descend e2
+            let withOp o = ExprInfixApp (node, e1, ValId "<-", ExprInfixApp (node, e1, ValId o, e2))
+
+            let res = combineResults res1 res2
+
             match op with
-            | "=" -> ExprInfixApp (node, e1, ValId "<-", e2)
-            | "+=" -> withOp "+" 
-            | "-=" -> withOp "-" 
+            | "=" -> res, ExprInfixApp (node, e1, ValId "<-", e2)
+            | "+=" -> res, withOp "+" 
+            | "-=" -> res, withOp "-"
+            | _ -> ErrorType.UnknownAssignmentOperator op |> createError node |> addError res, Mk.mkError node
+
         | PrefixUnaryExpressionSyntax(SyntaxToken op,e) as n ->
-            let e = descend e
+            let res, e = descend e
             let withOp o c = [ExprInfixApp (node, e, ValId "<-", ExprInfixApp (node, e, ValId o, ExprConst (node, ConstId c))); e] |> sequence node
             match op with
-            | "++" -> withOp "+" "1"
-            | "--" -> withOp "-" "1"
-            | "!" -> ExprApp(node, mkExprVal node "not", e)
-            | "-" -> ExprApp(node, mkExprVal node "-", e)
-            | x -> raise (sprintf "Unknown prefix operator: %s %s" x (misssingCaseExpr n) |> ErrorMsg.Error |> MissingCase)
+            | "++" -> res, withOp "+" "1"
+            | "--" -> res, withOp "-" "1"
+            | "!" -> res, ExprApp(node, mkExprVal node "not", e)
+            | "-" -> res, ExprApp(node, mkExprVal node "-", e)
+            | x -> ErrorType.UnknownPrefixOperator x |> createError node |> addError res, Mk.mkError node
         | PostfixUnaryExpressionSyntax(e,SyntaxToken op) as n ->
             //TODO: correct postfix operator sequence
-            let e = descend e
+            let res, e = descend e
             let withOp o c = [ExprInfixApp (node, e, ValId "<-", ExprInfixApp (node, e, ValId o, ExprConst (node, ConstId c))); e] |> sequence node
             match op with
-            | "++" -> withOp "+" "1"
-            | "--" -> withOp "-" "1"
-            | x -> raise (sprintf "Unknown postfix operator: %s %s" x (misssingCaseExpr n) |> ErrorMsg.Error |> MissingCase)
+            | "++" -> res, withOp "+" "1"
+            | "--" -> res, withOp "-" "1"
+            | x -> ErrorType.UnknownPostfixOperator x |> createError node |> addError res, Mk.mkError node
             
         | InterpolatedStringExpressionSyntax(_, xs, _) as n -> 
             let parts = 
@@ -350,52 +436,89 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
                     ) |> Seq.cache
             let formatString = parts |> Seq.map fst |> String.concat ""
             let exprs = parts |> Seq.choose snd
-            exprs |> Seq.fold (fun e x -> ExprApp(node, e, descend x)) (mkExprVal node <| "sprintf \"" + formatString + "\"")
+            let childs = exprs |> Seq.map (fun e -> descend e) |> Seq.toList
+            childs |> Seq.map fst |> collectResults,
+            childs |> Seq.map snd |> Seq.fold (fun e x -> ExprApp(node, e, x)) (mkExprVal node <| "sprintf \"" + formatString + "\"")
         
         | IdentifierNameSyntax(SyntaxToken text) as n -> 
             let identInfo = model.GetSymbolInfo (n:SyntaxNode)
             let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text.Trim())
             let isThis = Option.attempt (fun () -> identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(text.StartsWith("this."))) |> Option.fill false
             let prefix = if isThis then (if identInfo.Symbol.IsStatic then thisClassName+"." else "this.") else ""
+            
+            ConvertResults.Empty,
             mkExprVal node <| prefix +  text
-        | LiteralExpressionSyntax(SyntaxToken text) -> ExprConst (node, ConstId text)
+        | LiteralExpressionSyntax(SyntaxToken text) -> ConvertResults.Empty, ExprConst (node, ConstId text)
         | ExpressionStatementSyntax(_,expr,_) -> descend expr
         | ObjectCreationExpressionSyntax(_, typ, args, init) -> 
             match args, init with
-            | null, null -> raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)
-            | _,null -> ExprNew (node, getType [] typ, printArgumentList args)
-            | null,_ -> ExprNew (node, getType [] typ, ExprTuple (node, [descend init]))
-            | _, _ -> raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)
+            | null, null -> unknownNode node // raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)
+            | _,null -> let res, e = printArgumentList (args :> SyntaxNode) in res, ExprNew (node, getType [] typ, e)
+            | null,_ ->  let res, desc = descend init in res, ExprNew (node, getType [] typ, ExprTuple (node, [desc]))
+            | _, _ -> unknownNode node // raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)
         
         | ParenthesizedExpressionSyntax(_,e,_) -> descend e
         | LocalDeclarationStatementSyntax(isConst, varDecl, _) as n->
             let binds = getVariableDeclarators varDecl
-            binds |> Seq.map (fun (p,e) -> ExprBind(varDecl :> SyntaxNode, getMutableModifier n, p, e)) |> sequence node
+            binds |> Seq.map (fun (r, p, e) -> r, ExprBind(varDecl :> SyntaxNode, getMutableModifier n, p, e)) |> sequenceTree node
         
         | EqualsValueClauseSyntax(_, value) -> descend value
         
-        | LockStatementSyntax(_, _, e, _, stmt) -> ExprApp (node, ExprApp (node, mkExprVal node "lock", descend e), ExprLambda (node, [PatTuple (node,[])], descend stmt))
+        | LockStatementSyntax(_, _, e, _, stmt) ->
+            let res1, stmt = descend stmt
+            let res2, e = descend e
+
+            combineResults res1 res2,
+            ExprApp (node, ExprApp (node, mkExprVal node "lock", e), ExprLambda (node, [PatTuple (node,[])], stmt))
         | UsingStatementSyntax(_, _, decl, e, _, stmt) ->
             let binds = getVariableDeclarators decl
-            binds |> Seq.map (fun (p,e) -> ExprUseBind(decl :> SyntaxNode, p, e)) |> sequence node
-            |> (fun e -> ExprBind (node, [], mkPatBind node "__", [e; descend stmt] |> sequence node))
+            binds |> Seq.map (fun (r, p, e) -> r, ExprUseBind(decl :> SyntaxNode, p, e)) |> sequenceTree node
+            |> (fun (r, e) -> 
+                let res, stmt = descend stmt
+                combineResults res r,
+                ExprBind (node, [], mkPatBind node "__", [e; stmt] |> sequence node))
         | WhileStatementSyntax(_, _, e, _, stmt) ->
-            ExprWhile (node, descend e, descend stmt)
+            let res1, stmt = descend stmt
+            let res2, e = descend e
+
+            combineResults res1 res2,
+            ExprWhile (node, e, stmt)
         | ForEachStatementSyntax(_, _, typ, SyntaxToken ident, _, e, _, stmt) ->
-            ExprFor (node, mkPatBind node ident |> getTypePat (set[]) typ, descend e, descend stmt)
+            let res1, stmt = descend stmt
+            let res2, e = descend e
+
+            combineResults res1 res2,
+            ExprFor (node, mkPatBind node ident |> getTypePat (set[]) typ, e, stmt)
         | ForStatementSyntax(varDecl, initActions, cond, postActions, stmt) ->
             let binds = varDecl |> Option.ofObj |> Option.map getVariableDeclarators 
-            let bindsExpr = binds |> Option.map (Seq.map (fun (p,e) -> ExprBind(node, getMutableModifier varDecl, p, e)) >> Seq.toList) |> Option.fill []
-            let initExpr = bindsExpr @ (initActions |> Seq.map descend |> Seq.toList) |> sequence node
-            let bodyExpr = [descend stmt] @ (postActions |> Seq.map descend |> Seq.toList) |> sequence node
-            (node, [initExpr; ExprWhile (node, descend cond, bodyExpr)] |> sequence node) |> ExprDo
+            let bindsExpr = binds |> Option.map (Seq.map (fun (r, p, e) -> r, ExprBind(node, getMutableModifier varDecl, p, e)) >> Seq.toList) |> Option.fill []
+            let initExpr = bindsExpr @ (initActions |> Seq.map descend |> Seq.toList) |> sequenceTree node
+            let whileExpr =
+                let bodyRes, bodyExpr = [descend stmt] @ (postActions |> Seq.map descend |> Seq.toList) |> sequenceTree node
+                let condRes, cond = descend cond
+                combineResults bodyRes condRes, ExprWhile (node, cond, bodyExpr)
+            let finalRes, finalExpr = [initExpr; whileExpr ] |> sequenceTree node
+            finalRes,
+            ExprDo (node, finalExpr)
         | IfStatementSyntax(_, _, e, _, stmt, elseStmt) ->
-            ExprIf(node, descend e, descend stmt, elseStmt |> Option.ofObj |> Option.map descend)
+            let res1, stmt = descend stmt
+            let res2, e = descend e
+            let elseStmtDesc = elseStmt |> Option.ofObj |> Option.map descend
+            let elseStmt = elseStmtDesc |> Option.map snd
+            [ yield Some res1; yield Some res2; yield elseStmtDesc |> Option.map fst ] |> Seq.choose id |> collectResults,
+            ExprIf(node, e, stmt, elseStmt)
         | ElseClauseSyntax(_,e) -> descend e
         | ConditionalExpressionSyntax(e1, _, e2, _, e3) ->
-            ExprIf(node, descend e1, descend e2, Some (descend e3))
+            let res1, e1 = descend e1
+            let res2, e2 = descend e2
+            let res3, e3 = descend e3
+            collectResults [ res1; res2; res3 ],
+            ExprIf(node, e1, e2, Some e3)
         | ConditionalAccessExpressionSyntax(e1, _, e2) -> 
-            ExprInfixApp(node, descend e1, ValId "?.", descend e2)
+            let res1, e1 = descend e1
+            let res2, e2 = descend e2
+            combineResults res1 res2,
+            ExprInfixApp(node, e1, ValId "?.", e2)
         | TryStatementSyntax (_, body, catches, finallyBody) -> 
             let getMatch = function
                 | CatchClauseSyntax (_, CatchDeclarationSyntax(_,t,tok,_), filter, block) as catchNode ->
@@ -405,21 +528,36 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
                         | PatWithType(ctx, t, PatWildcard ctx1) -> PatWithType(ctx, t, PatWildcard ctx1)
                         | PatWithType(ctx, t, PatBind (ctx1, x)) -> PatBindAs(ctx, x, PatWithType(ctx1, t, PatWildcard ctx1))
                         | x -> failwithf "Unexpected case %A" x
-                    catchNode, ident |> getTypePat (set[]) t |> typeCheckPat, exprFilter |> Option.map descend, descend block
-            ExprTry(node, descend body, catches |> List.map getMatch, finallyBody |> Option.ofNull |> Option.map descend)
+                    let exprFilterO = exprFilter |> Option.map descend
+                    let blockRes, block = descend block
+                    [ yield Some blockRes; yield exprFilterO |> Option.map fst ] |> Seq.choose id |> collectResults,
+                    (catchNode, ident |> getTypePat (set[]) t |> typeCheckPat, exprFilterO |> Option.map snd, block)
+
+            let catches = catches |> List.map getMatch
+            let finallyBodyO = finallyBody |> Option.ofNull |> Option.map descend
+            let bodyRes, body = descend body
+            [ yield! catches |> Seq.map (fst >> Some); yield finallyBodyO |> Option.map fst; yield Some bodyRes ] |> Seq.choose id |> collectResults,
+            ExprTry(node, body, catches |> List.map snd, finallyBodyO |> Option.map snd)
         | FinallyClauseSyntax (_,body) -> descend body
-        | ThrowStatementSyntax (_, e, _) -> ExprApp (node, mkExprVal node "raise", descend e)
+        | ThrowStatementSyntax (_, e, _) -> let res, desc = descend e in res, ExprApp (node, mkExprVal node "raise", desc)
         | ArrayCreationExpressionSyntax(t, rs, InitializerExpressionSyntax([]))
-        | ArrayCreationExpressionSyntax(t, rs, null) -> 
-            ExprArrayInit (node, getType [] t, rs |> List.collect (fun r -> r.Sizes |> Seq.map descend |> Seq.toList))
+        | ArrayCreationExpressionSyntax(t, rs, null) ->
+            let results = rs |> List.collect (fun r -> r.Sizes |> Seq.map descend |> Seq.toList)
+            
+            results |> Seq.map fst |> collectResults,
+            ExprArrayInit (node, getType [] t, results |> List.map snd)
         | ArrayCreationExpressionSyntax(_, _, InitializerExpressionSyntax(es)) 
         | ImplicitArrayCreationExpressionSyntax(_,_,_,InitializerExpressionSyntax(es))
-        | InitializerExpressionSyntax(es) -> ExprArray(node, es |> List.map descend)
+        | InitializerExpressionSyntax(es) ->
+            let results = es |> List.map descend
+
+            results |> Seq.map fst |> collectResults,
+            ExprArray(node, results |> List.map snd)
         
         | PredefinedTypeSyntax (SyntaxToken tok)
-        | ThisExpressionSyntax (SyntaxToken tok) -> mkExprVal node tok
-        | CastExpressionSyntax(_,t,_,e) -> ExprTypeConversion (node, getType [] t, descend e)
-        | TypeOfExpressionSyntax (_,_,t,_) -> ExprWithGeneric(node, [getType [] t], mkExprVal node "typeof")
+        | ThisExpressionSyntax (SyntaxToken tok) -> ConvertResults.Empty, mkExprVal node tok
+        | CastExpressionSyntax(_,t,_,e) -> let res, e = descend e in res,  ExprTypeConversion (node, getType [] t, e)
+        | TypeOfExpressionSyntax (_,_,t,_) -> ConvertResults.Empty, ExprWithGeneric(node, [getType [] t], mkExprVal node "typeof")
 
         | SwitchStatementSyntax(_,_, e, _, _, cases, _) ->
             let matches = 
@@ -427,22 +565,28 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
                     labels |> List.map (function 
                         | :? CaseSwitchLabelSyntax as l -> l :> SyntaxNode, l.Value.ToString().Trim()
                         | :? DefaultSwitchLabelSyntax as l -> l :> SyntaxNode, "_")
-                    |> List.map (fun (l, x) -> switchNode :> SyntaxNode, x |> mkPatBind l, None, stmts |> List.map descend |> sequence node)
+                    |> List.map (fun (l, x) -> 
+                        let results, expr = stmts |> List.map descend |> sequenceTree node
+                        results,
+                        (switchNode :> SyntaxNode, x |> mkPatBind l, None, expr))
                 )
-            ExprMatch (node, descend e, matches)
+            let res, e = descend e
+
+            matches |> Seq.map fst |> collectResults |> combineResults res,            
+            ExprMatch (node, e, matches |> List.map snd)
 
         // not supported syntax
-        | BreakStatementSyntax _ -> mkExprVal node "break"
-        | ContinueStatementSyntax _ -> mkExprVal node "continue"
+        | BreakStatementSyntax _ -> ErrorType.BreakNotSupported |> createError node |> fromError, Mk.mkError node
+        | ContinueStatementSyntax _ -> ErrorType.ContinueNotSupported |> createError node |> fromError, Mk.mkError node
         
-        | _ ->
-            mkExprVal node (sprintf "// UNKNOWN(%A)"  (misssingCaseExpr node |> ErrorMsg.Error))
+        | _ -> unknownNode node
             //raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)
 
     try
     if tryImplicitConv then
-        implicitConv node |> Option.map (fun t -> 
-            ExprTypeConversion (node, t, descendNoImplicit node)) 
+        implicitConv node |> Option.map (fun t ->
+            let res, desc = descendNoImplicit node
+            res, ExprTypeConversion (node, t, desc)) 
         |> Option.fillWith (fun () -> exprF node)
     else exprF node
     with 
@@ -460,7 +604,11 @@ let convert (csTree: SyntaxTree) =
 
 let convertText (csharp:string) =
     let tree = CSharpSyntaxTree.ParseText(csharp)
-    let expr = tree |> convert |> Program
+    let results, expr = tree |> convert
+#if DEBUG
+    printfn "Results %A" results
+#endif
+    let expr = expr |> Program
     // expr |> (printfn "%A")
     // printfn "==========="
     let blockExpr = expr |> cs2fs.FSharpOutput.toFs
