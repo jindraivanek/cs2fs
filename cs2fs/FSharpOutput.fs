@@ -209,7 +209,7 @@ and getBind header modifiers isRec isFirstRec (p, e) =
 
 and getExpr (e:Expr<'a>) =
     match e with
-    | ExprError (_) -> Text "(* ERROR *)"
+    | ExprError (_, msg) -> Text <| sprintf "(* ERROR %s *)" msg
     | ExprConst (_, ConstId c) -> Text c
     | ExprVal (_, ValId v) -> Text v
     | ExprApp (_, e1, e2) -> [getExpr e1; getExprMP e2] |> delimText " " |> Paren
