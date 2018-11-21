@@ -73,7 +73,7 @@ let createError node tp = { ProblematicNode = node; Type = tp }
 let addError res e = { res with Errors = e :: res.Errors }
 let fromError e = { ConvertResults.Empty with Errors = [ e ] }
 
-let unknownNode n = ErrorType.UnknownNode |> createError n |> fromError, Mk.mkError n
+let unknownNode n = ErrorType.UnknownNode |> createError n |> fromError, Mk.mkError n (sprintf "UnknownNode %s" <| n.GetType().ToString())
 
 let combineResults (r1:ConvertResults) (r2:ConvertResults) =
     { Warnings = r1.Warnings @ r2.Warnings
@@ -412,7 +412,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             | "=" -> res, ExprInfixApp (node, e1, ValId "<-", e2)
             | "+=" -> res, withOp "+" 
             | "-=" -> res, withOp "-"
-            | _ -> ErrorType.UnknownAssignmentOperator op |> createError node |> addError res, Mk.mkError node
+            | _ -> ErrorType.UnknownAssignmentOperator op |> createError node |> addError res, Mk.mkError node (sprintf "UnknownAssignmentOperator %s" op)
 
         | PrefixUnaryExpressionSyntax(SyntaxToken op,e) as n ->
             let res, e = descend e
@@ -422,7 +422,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             | "--" -> res, withOp "-" "1"
             | "!" -> res, ExprApp(node, mkExprVal node "not", e)
             | "-" -> res, ExprApp(node, mkExprVal node "-", e)
-            | x -> ErrorType.UnknownPrefixOperator x |> createError node |> addError res, Mk.mkError node
+            | x -> ErrorType.UnknownPrefixOperator x |> createError node |> addError res, Mk.mkError node (sprintf "UnknownPrefixOperator %s" x)
         | PostfixUnaryExpressionSyntax(e,SyntaxToken op) as n ->
             //TODO: correct postfix operator sequence
             let res, e = descend e
@@ -430,7 +430,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             match op with
             | "++" -> res, withOp "+" "1"
             | "--" -> res, withOp "-" "1"
-            | x -> ErrorType.UnknownPostfixOperator x |> createError node |> addError res, Mk.mkError node
+            | x -> ErrorType.UnknownPostfixOperator x |> createError node |> addError res, Mk.mkError node (sprintf "UnknownPostfixOperator %s" x)
             
         | InterpolatedStringExpressionSyntax(_, xs, _) as n -> 
             let parts = 
@@ -586,8 +586,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             ExprMatch (node, e, matches |> List.map snd)
 
         // not supported syntax
-        | BreakStatementSyntax _ -> ErrorType.BreakNotSupported |> createError node |> fromError, Mk.mkError node
-        | ContinueStatementSyntax _ -> ErrorType.ContinueNotSupported |> createError node |> fromError, Mk.mkError node
+        | BreakStatementSyntax _ -> ErrorType.BreakNotSupported |> createError node |> fromError, Mk.mkError node "BreakNotSupported"
+        | ContinueStatementSyntax _ -> ErrorType.ContinueNotSupported |> createError node |> fromError, Mk.mkError node "ContinueNotSupported"
         
         | _ -> unknownNode node
             //raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)

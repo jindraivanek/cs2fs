@@ -183,7 +183,7 @@ and getMember className x =
             |> Option.fill (Text (if isAutoProperty then " with get, set" else ""))
         header |++| getterText |++| (if haveSetter then setterText else Text "")
     match x with
-    | ExprError (_) -> Text "(* ERROR *)"
+    | ExprError (_, msg) -> Text <| sprintf "(* ERROR %s *)" msg
     | ExprMember (_, ValId v, generics, modifiers, thisVal, args, expr) -> 
         getModifiersOfGroup 1 modifiers |++| Text (if haveModifier Override modifiers then "" else "member ") |++| getModifiersOfGroup 2 modifiers 
         |++| (thisVal |> Option.map (fun (ValId x) -> Text(x + ".")) |> Option.fill (Text "")) |++| Text v
@@ -210,7 +210,7 @@ and getBind header modifiers isRec isFirstRec (p, e) =
 
 and getExpr (e:Expr<'a>) =
     match e with
-    | ExprError (_) -> Text "(* ERROR *)"
+    | ExprError (_, msg) -> Text <| sprintf "(* ERROR %s *)" msg
     | ExprConst (_, ConstId c) -> Text c
     | ExprVal (_, ValId v) -> Text v
     | ExprApp (_, e1, e2) -> [getExpr e1; getExprMP e2] |> delimText " " |> Paren
