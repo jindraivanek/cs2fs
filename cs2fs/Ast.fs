@@ -52,7 +52,8 @@ type TypeDecl<'TContext> =
     | TypeDeclRecord of 'TContext * (FieldId * TypeDecl<'TContext>) list
     | TypeDeclUnion of 'TContext * (ValId * TypeDecl<'TContext> option) list
     | TypeDeclTuple of 'TContext * TypeDecl<'TContext> list
-    | TypeDeclClass of 'TContext * Modifier list * Typ list * Pat<'TContext> * Expr<'TContext> list
+    /// 'type ... Type<..>(...) ='
+    | TypeDeclClass of ctx:'TContext * typeModifiers:Modifier list * genericArgs:Typ list * parameters:Pat<'TContext> * members:Expr<'TContext> list
     | TypeDeclId of 'TContext * TypeId
     member x.Context =
         match x with
