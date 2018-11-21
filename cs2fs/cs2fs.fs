@@ -303,6 +303,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
 
                 [ yield getBlockO |> Option.map fst; yield setBlockO |> Option.map fst; yield Some r ] |> Seq.choose id |> collectResults,
                 [ExprMemberPropertyWithSet (n, propPat, init, getBlockO |> Option.map snd, setBlockO |> Option.map snd) |> applyAttributes attrs]
+            | _ -> let r, e = unknownNode n in r, [ e ]
+
             
         | FieldDeclarationSyntax(attrs,varDecl,_) as n -> 
             let binds = getVariableDeclarators varDecl
@@ -357,6 +359,10 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             let inheritMembers = inheritFrom |> List.map (fun b -> ExprInherit (basesIn :> SyntaxNode, TypType (TypeId b)))
             
             let members = members |> List.map (getMembers gs)
+
+            // Constructor is tricky, first let's check if there is a default constructor
+            //members |> Seq.tryFind(fun (_, exp) -> exp.)
+
 
             members |> Seq.map fst |> collectResults,
             ExprType (n, TypeId ident,
@@ -443,7 +449,11 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         | IdentifierNameSyntax(SyntaxToken text) as n -> 
             let identInfo = model.GetSymbolInfo (n:SyntaxNode)
             let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text.Trim())
-            let isThis = Option.attempt (fun () -> identInfo.Symbol.ContainingSymbol.Name = thisClassName && not(text.StartsWith("this."))) |> Option.fill false
+            let isThis = 
+                identInfo.Symbol |> Option.ofObj
+                |> Option.bind (fun symbol -> Option.ofObj symbol.ContainingSymbol)
+                |> Option.map (fun containing -> containing.Name = thisClassName && not(text.StartsWith("this.")))
+                |> Option.fill false
             let prefix = if isThis then (if identInfo.Symbol.IsStatic then thisClassName+"." else "this.") else ""
             
             ConvertResults.Empty,

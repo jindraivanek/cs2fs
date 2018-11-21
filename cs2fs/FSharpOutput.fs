@@ -183,6 +183,7 @@ and getMember className x =
             |> Option.fill (Text (if isAutoProperty then " with get, set" else ""))
         header |++| getterText |++| (if haveSetter then setterText else Text "")
     match x with
+    | ExprError (_) -> Text "(* ERROR *)"
     | ExprMember (_, ValId v, generics, modifiers, thisVal, args, expr) -> 
         getModifiersOfGroup 1 modifiers |++| Text (if haveModifier Override modifiers then "" else "member ") |++| getModifiersOfGroup 2 modifiers 
         |++| (thisVal |> Option.map (fun (ValId x) -> Text(x + ".")) |> Option.fill (Text "")) |++| Text v
