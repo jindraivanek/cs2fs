@@ -67,7 +67,7 @@ type TypeDecl<'TContext> =
 /// 'TContext is context specific information like the source range in the C# code and similar information.
 and Expr<'TContext> =
     /// Marker for places we couldn't translate
-    | ExprError of 'TContext * string
+    | ExprError of 'TContext
     | ExprConst of 'TContext * ConstId
     | ExprVal of 'TContext * ValId
     | ExprApp of 'TContext * Expr<'TContext> * Expr<'TContext> //application
@@ -219,7 +219,7 @@ module rec Transforms =
     let transformExpr astF e =
         let (eF, tF, pF, dF) = recFuncs astF
         match e with
-        | ExprError (ctx, msg) -> ExprError (ctx, msg)
+        | ExprError (ctx) -> ExprError (ctx)
         | ExprApp(ctx, e1, e2) -> ExprApp(ctx, eF e1, eF e2)
         | ExprInfixApp(ctx, e1, op, e2) -> ExprInfixApp(ctx, eF e1, op, eF e2)
         | ExprDotApp(ctx, e1, e2) -> ExprDotApp(ctx, eF e1, eF e2)
@@ -447,4 +447,4 @@ module Mk =
     let mkExprVal ctx n = ExprVal(ctx, mkValId n)
     let mkPatBind ctx n = PatBind(ctx, mkValId n)
 
-    let mkError ctx msg = ExprError(ctx, msg)
+    let mkError ctx = ExprError(ctx)
