@@ -24,82 +24,157 @@ type Typ =
 | TypTuple of Typ list
 
 // Pattern
-type Pat =
-| PatConst of ConstId
-| PatWildcard
-| PatBind of ValId //binding to identificator
-| PatCons of ValId * Pat list
-| PatInfixCons of Pat * ValId * Pat
-| PatTuple of Pat list
-| PatList of Pat list
-| PatRecord of (FieldId * Pat) list
-| PatWithType of Typ * Pat
-| PatBindAs of ValId * Pat
+type Pat<'TContext> =
+    | PatConst of 'TContext * ConstId
+    | PatWildcard of 'TContext
+    | PatBind of 'TContext * ValId //binding to identificator
+    | PatCons of 'TContext * ValId * Pat<'TContext> list
+    | PatInfixCons of 'TContext * Pat<'TContext> * ValId * Pat<'TContext>
+    | PatTuple of 'TContext * Pat<'TContext> list
+    | PatList of 'TContext * Pat<'TContext> list
+    | PatRecord of 'TContext * (FieldId * Pat<'TContext>) list
+    | PatWithType of 'TContext * Typ * Pat<'TContext>
+    | PatBindAs of 'TContext * ValId * Pat<'TContext>
+    member x.Context =
+        match x with
+        | PatConst (ctx, _)
+        | PatWildcard ctx
+        | PatBind (ctx, _)
+        | PatCons (ctx, _, _)
+        | PatInfixCons (ctx, _, _, _)
+        | PatTuple  (ctx, _)
+        | PatList  (ctx, _)
+        | PatRecord  (ctx, _)
+        | PatWithType  (ctx, _, _)
+        | PatBindAs  (ctx, _, _) -> ctx
 
-type TypeDecl = 
-| TypeDeclRecord of (FieldId * TypeDecl) list
-| TypeDeclUnion of (ValId * TypeDecl option) list
-| TypeDeclTuple of TypeDecl list
-| TypeDeclClass of Modifier list * Typ list * Pat * Expr list
-| TypeDeclId of TypeId
+type TypeDecl<'TContext> = 
+    | TypeDeclRecord of 'TContext * (FieldId * TypeDecl<'TContext>) list
+    | TypeDeclUnion of 'TContext * (ValId * TypeDecl<'TContext> option) list
+    | TypeDeclTuple of 'TContext * TypeDecl<'TContext> list
+    /// 'type ... Type<..>(...) ='
+    | TypeDeclClass of ctx:'TContext *  typeModifiers:Modifier list * genericArgs:Typ list * parameters:Pat<'TContext> * members:Expr<'TContext> list
+    | TypeDeclId of 'TContext * TypeId
+    member x.Context =
+        match x with
+        | TypeDeclRecord (ctx, _)
+        | TypeDeclUnion (ctx, _)
+        | TypeDeclTuple (ctx, _)
+        | TypeDeclClass(ctx, _, _, _, _)
+        | TypeDeclId (ctx, _) -> ctx
 
-and Expr =
-| ExprConst of ConstId
-| ExprVal of ValId
-| ExprApp of Expr * Expr //application
-| ExprInfixApp of Expr * ValId * Expr
-| ExprDotApp of Expr * Expr
-| ExprItemApp of Expr * Expr // e1.[e2]
-| ExprTuple of Expr list
-| ExprList of Expr list
-| ExprArray of Expr list
-| ExprRecord of Expr option * (FieldId * Expr) list // recordToCopy, fields
-| ExprSequence of Expr list // command1; commmand2; Expr
-| ExprBind of Modifier list * Pat * Expr // let x = expr1
-| ExprUseBind of Pat * Expr
-| ExprRecBind of (Pat * Expr) list
-| ExprMatch of Expr * Match list
-| ExprMatchLambda of Match list
-| ExprLambda of Pat list * Expr
-| ExprWithType of Typ * Expr
-| ExprModule of ModuleId * Expr
-| ExprNamespace of NamespaceId * Expr
-| ExprType of TypeId * TypeDecl
-| ExprNew of Typ * Expr
-| ExprDefaultOf of Typ
-| ExprInclude of ModuleId
-| ExprIf of Expr * Expr * Expr option
-| ExprFor of Pat * Expr * Expr
-| ExprWhile of cond: Expr * body: Expr
-| ExprDo of Expr // do block
-| ExprWithGeneric of Typ list * Expr
-| ExprTry of Expr * Match list * Expr option // try body, with matches, finally body
+/// An F# expression
+/// 'TContext is context specific information like the source range in the C# code and similar information.
+and Expr<'TContext> =
+    /// Marker for places we couldn't translate
+    | ExprError of 'TContext
+    | ExprConst of 'TContext * ConstId
+    | ExprVal of 'TContext * ValId
+    | ExprApp of 'TContext * Expr<'TContext> * Expr<'TContext> //application
+    | ExprInfixApp of 'TContext * Expr<'TContext> * ValId * Expr<'TContext>
+    | ExprDotApp of 'TContext * Expr<'TContext> * Expr<'TContext>
+    | ExprItemApp of 'TContext * Expr<'TContext> * Expr<'TContext> // e1.[e2]
+    | ExprTuple of 'TContext * Expr<'TContext> list
+    | ExprList of 'TContext * Expr<'TContext> list
+    | ExprArray of 'TContext * Expr<'TContext> list
+    | ExprRecord of 'TContext * Expr<'TContext> option * (FieldId * Expr<'TContext>) list // recordToCopy, fields
+    | ExprSequence of 'TContext * Expr<'TContext> list // command1; commmand2; Expr
+    | ExprBind of 'TContext * Modifier list * Pat<'TContext> * Expr<'TContext> // let x = expr1
+    | ExprUseBind of 'TContext * Pat<'TContext> * Expr<'TContext>
+    | ExprRecBind of 'TContext * (Pat<'TContext> * Expr<'TContext>) list
+    | ExprMatch of 'TContext * Expr<'TContext> * Match<'TContext> list
+    | ExprMatchLambda of 'TContext * Match<'TContext> list
+    | ExprLambda of 'TContext * Pat<'TContext> list * Expr<'TContext>
+    | ExprWithType of 'TContext *  Typ * Expr<'TContext>
+    | ExprModule of 'TContext * ModuleId * Expr<'TContext>
+    | ExprNamespace of 'TContext * NamespaceId * Expr<'TContext>
+    | ExprType of 'TContext * TypeId * TypeDecl<'TContext>
+    | ExprNew of 'TContext * Typ * Expr<'TContext>
+    | ExprDefaultOf of 'TContext * Typ
+    /// open 'moduleId'
+    | ExprInclude of 'TContext * ModuleId
+    | ExprIf of 'TContext * Expr<'TContext> * Expr<'TContext> * Expr<'TContext> option
+    | ExprFor of 'TContext * Pat<'TContext> * Expr<'TContext> * Expr<'TContext>
+    | ExprWhile of 'TContext * cond: Expr<'TContext> * body: Expr<'TContext>
+    | ExprDo of 'TContext * Expr<'TContext> // do block
+    | ExprWithGeneric of 'TContext * Typ list * Expr<'TContext>
+    | ExprTry of 'TContext * Expr<'TContext> * Match<'TContext> list * Expr<'TContext> option // try body, with matches, finally body
 
-| ExprMember of ValId * Typ list * Modifier list * ValId option * Pat * Expr
-| ExprMemberConstructor of Modifier list * Pat * Expr
-| ExprMemberProperty of Pat * Expr * Expr option
-| ExprMemberPropertyWithSet of Pat * Expr * Expr option * Expr option
-| ExprInterfaceImpl of Typ * Expr
-| ExprInherit of Typ
+    | ExprMember of 'TContext * ValId * Typ list * Modifier list * ValId option * Pat<'TContext> * Expr<'TContext>
+    | ExprMemberConstructor of 'TContext * Modifier list * Pat<'TContext> * Expr<'TContext>
+    | ExprMemberProperty of 'TContext * Pat<'TContext> * Expr<'TContext> * Expr<'TContext> option
+    | ExprMemberPropertyWithSet of 'TContext * Pat<'TContext> * Expr<'TContext> * Expr<'TContext> option * Expr<'TContext> option
+    | ExprInterfaceImpl of 'TContext * Typ * Expr<'TContext>
+    | ExprInherit of 'TContext * Typ
 
-| ExprAttribute of AttributeId list * Expr
+    | ExprAttribute of 'TContext * AttributeId list * Expr<'TContext>
 
-| ExprTypeConversion of Typ * Expr
-| ExprArrayInit of Typ * Expr list // array type, array sizes
-| ExprReturn of Expr
+    | ExprTypeConversion of 'TContext * Typ * Expr<'TContext>
+    | ExprArrayInit of 'TContext * Typ * Expr<'TContext> list // array type, array sizes
+    | ExprReturn of 'TContext * Expr<'TContext>
+    member x.Context =
+        match x with
+        | ExprConst (ctx, _)
+        | ExprVal (ctx, _)
+        | ExprApp (ctx, _, _)
+        | ExprInfixApp (ctx, _, _, _)
+        | ExprDotApp  (ctx, _, _)
+        | ExprItemApp  (ctx, _, _)
+        | ExprTuple (ctx, _)
+        | ExprList (ctx, _)
+        | ExprArray (ctx, _)
+        | ExprRecord(ctx, _, _)
+        | ExprSequence (ctx, _)
+        | ExprBind(ctx, _, _, _)
+        | ExprUseBind  (ctx, _, _)
+        | ExprRecBind  (ctx, _)
+        | ExprMatch (ctx, _, _)
+        | ExprMatchLambda (ctx, _)
+        | ExprLambda (ctx, _, _)
+        | ExprWithType (ctx, _, _)
+        | ExprModule (ctx, _, _)
+        | ExprNamespace (ctx, _, _)
+        | ExprType (ctx, _, _)
+        | ExprNew  (ctx, _, _)
+        | ExprDefaultOf (ctx, _)
+        /// open 'moduleId'
+        | ExprInclude (ctx, _)
+        | ExprIf (ctx, _, _, _)
+        | ExprFor (ctx, _, _, _)
+        | ExprWhile (ctx, _, _)
+        | ExprDo (ctx, _)
+        | ExprWithGeneric (ctx, _, _)
+        | ExprTry (ctx, _, _, _)
 
-and Match = Pat * Expr option * Expr
+        | ExprMember (ctx, _, _, _, _, _, _)
+        | ExprMemberConstructor(ctx, _, _, _)
+        | ExprMemberProperty(ctx, _, _, _)
+        | ExprMemberPropertyWithSet (ctx, _, _, _, _)
+        | ExprInterfaceImpl (ctx, _, _)
+        | ExprInherit(ctx, _)
 
-type Program = Program of Expr
+        | ExprAttribute (ctx, _, _)
 
-type ASTmapF = {
-    ExprF : Expr -> Expr option
+        | ExprTypeConversion  (ctx, _, _)
+        | ExprArrayInit (ctx, _, _)
+        | ExprReturn(ctx, _) -> ctx
+
+and Match<'TContext> = 'TContext * Pat<'TContext> * Expr<'TContext> option * Expr<'TContext>
+
+type Program<'TContext> =
+    | Program of Expr<'TContext>
+    member x.Expr =
+        match x with
+        | Program exp -> exp  
+    member x.Context = x.Expr.Context
+type ASTmapF<'TContext> = {
+    ExprF : Expr<'TContext> -> Expr<'TContext> option
     TypF : Typ -> Typ option
-    PatF : Pat -> Pat option
-    TypeDeclF : TypeDecl -> TypeDecl option
+    PatF : Pat<'TContext> -> Pat<'TContext> option
+    TypeDeclF : TypeDecl<'TContext> -> TypeDecl<'TContext> option
     RecurseIntoChanged: bool
 } with
-    static member Default = {
+    static member Default : ASTmapF<'TContext> = {
         ExprF = fun _ -> None
         TypF = fun _ -> None
         PatF = fun _ -> None
@@ -114,7 +189,7 @@ let rec exprIsValue =
     | ExprApp _
     | ExprConst _
     | ExprDotApp _
-    | ExprIf(_,_,Some _)
+    | ExprIf(_,_,_,Some _)
     | ExprInfixApp _
     | ExprList _
     | ExprArray _
@@ -125,10 +200,10 @@ let rec exprIsValue =
     | ExprRecord _
     | ExprTuple _
     | ExprVal _ -> true
-    | ExprTry(e,_,_)
-    | ExprWithType(_,e)
-    | ExprTypeConversion(_,e) -> exprIsValue e
-    | ExprSequence es -> es |> List.last |> exprIsValue
+    | ExprTry(_,e,_,_)
+    | ExprWithType(_,_,e)
+    | ExprTypeConversion(_,_,e) -> exprIsValue e
+    | ExprSequence (_,es) -> es |> List.last |> exprIsValue
     | _ -> false
 
 let applyAstF recurse f recF n = f n |> Option.map (if recurse then recF else id) |> Option.fillWith (fun () -> recF n) 
@@ -144,61 +219,62 @@ module rec Transforms =
     let transformExpr astF e =
         let (eF, tF, pF, dF) = recFuncs astF
         match e with
-        | ExprApp(e1, e2) -> ExprApp(eF e1, eF e2)
-        | ExprInfixApp(e1, op, e2) -> ExprInfixApp(eF e1, op, eF e2)
-        | ExprDotApp(e1, e2) -> ExprDotApp(eF e1, eF e2)
-        | ExprItemApp(e1, e2) -> ExprItemApp(eF e1, eF e2)
-        | ExprConst c -> ExprConst c
-        | ExprVal v -> ExprVal v
-        | ExprInclude m -> ExprInclude m
-        | ExprTuple es -> es |> List.map eF |> ExprTuple
-        | ExprList es -> es |> List.map eF |> ExprList
-        | ExprArray es -> es |> List.map eF |> ExprArray
-        | ExprRecord (me, fields) -> ((Option.map eF me), (fields |> List.map (fun (f, e) -> f, eF e))) |> ExprRecord
-        | ExprSequence es -> es |> List.map eF |> ExprSequence
-        | ExprBind (m, p, e) -> (m, pF p, eF e) |> ExprBind
-        | ExprUseBind (p, e) -> (pF p, eF e) |> ExprUseBind
-        | ExprRecBind xs ->  xs |> List.map (fun (p, e) -> p, eF e) |> ExprRecBind
-        | ExprMatch (e, m) -> (eF e, (m |> List.map (fun (p, eo, e) -> pF p, Option.map eF eo, eF e))) |> ExprMatch
-        | ExprMatchLambda m -> ExprMatchLambda (m |> List.map (fun (p, eo, e) -> pF p, Option.map eF eo, eF e))
-        | ExprLambda (ps, e) -> ExprLambda (List.map pF ps, eF e)
-        | ExprWithType (t, e) -> ExprWithType (tF t, eF e)
-        | ExprNamespace (m, e) -> ExprNamespace (m, eF e)
-        | ExprModule (m, e) -> ExprModule (m, eF e)
-        | ExprType (t, d) -> ExprType (t, dF d)
-        | ExprNew (t, e) -> ExprNew (tF t, eF e)
-        | ExprDefaultOf t -> ExprDefaultOf (tF t)
-        | ExprIf (e1,e2,eo) -> ExprIf(eF e1, eF e2, Option.map eF eo)
-        | ExprFor (p,e1,e2) -> ExprFor(pF p, eF e1, eF e2)
-        | ExprWhile (e1,e2) -> ExprWhile(eF e1, eF e2)
-        | ExprDo e -> ExprDo (eF e)
-        | ExprAttribute (a,e) -> ExprAttribute (a, eF e)
-        | ExprMember (v, gs, ms, vo, p, e) -> ExprMember(v, gs, ms, vo, pF p, eF e)
-        | ExprMemberConstructor (ms, p, e) -> ExprMemberConstructor(ms, pF p, eF e)
-        | ExprMemberProperty (p, e, eo) -> ExprMemberProperty (pF p, eF e, Option.map eF eo)
-        | ExprMemberPropertyWithSet (p, e, eo, eo2) -> ExprMemberPropertyWithSet (pF p, eF e, Option.map eF eo, Option.map eF eo2)
-        | ExprInterfaceImpl (t,e) -> ExprInterfaceImpl (tF t, eF e)
-        | ExprInherit t -> ExprInherit (tF t)
-        | ExprWithGeneric (g,e) -> ExprWithGeneric (List.map tF g, eF e)
-        | ExprTry (e, m, ef) -> ExprTry (eF e, (m |> List.map (fun (p, eo, e) -> pF p, Option.map eF eo, eF e)), Option.map eF ef)
+        | ExprError (ctx) -> ExprError (ctx)
+        | ExprApp(ctx, e1, e2) -> ExprApp(ctx, eF e1, eF e2)
+        | ExprInfixApp(ctx, e1, op, e2) -> ExprInfixApp(ctx, eF e1, op, eF e2)
+        | ExprDotApp(ctx, e1, e2) -> ExprDotApp(ctx, eF e1, eF e2)
+        | ExprItemApp(ctx, e1, e2) -> ExprItemApp(ctx, eF e1, eF e2)
+        | ExprConst (ctx, c) -> ExprConst (ctx, c)
+        | ExprVal (ctx, v) -> ExprVal (ctx, v)
+        | ExprInclude (ctx, m) -> ExprInclude (ctx, m)
+        | ExprTuple (ctx, es) -> ExprTuple(ctx, es |> List.map eF)
+        | ExprList (ctx, es) -> ExprList(ctx, es |> List.map eF)
+        | ExprArray (ctx, es) -> ExprArray(ctx, es |> List.map eF)
+        | ExprRecord (ctx, me, fields) -> (ctx, (Option.map eF me), (fields |> List.map (fun (f, e) -> f, eF e))) |> ExprRecord
+        | ExprSequence (ctx, es) -> ExprSequence(ctx, es |> List.map eF) 
+        | ExprBind (ctx, m, p, e) -> (ctx, m, pF p, eF e) |> ExprBind
+        | ExprUseBind (ctx, p, e) -> (ctx, pF p, eF e) |> ExprUseBind
+        | ExprRecBind (ctx, xs) -> (ctx, xs |> List.map (fun (p, e) -> p, eF e)) |> ExprRecBind
+        | ExprMatch (ctx, e, m) -> (ctx, eF e, (m |> List.map (fun (c, p, eo, e) -> c, pF p, Option.map eF eo, eF e))) |> ExprMatch
+        | ExprMatchLambda (ctx, m) -> ExprMatchLambda (ctx, m |> List.map (fun (c, p, eo, e) -> c, pF p, Option.map eF eo, eF e))
+        | ExprLambda (ctx, ps, e) -> ExprLambda (ctx, List.map pF ps, eF e)
+        | ExprWithType (ctx, t, e) -> ExprWithType (ctx, tF t, eF e)
+        | ExprNamespace (ctx, m, e) -> ExprNamespace (ctx, m, eF e)
+        | ExprModule (ctx, m, e) -> ExprModule (ctx, m, eF e)
+        | ExprType (ctx, t, d) -> ExprType (ctx, t, dF d)
+        | ExprNew (ctx, t, e) -> ExprNew (ctx, tF t, eF e)
+        | ExprDefaultOf (ctx, t) -> ExprDefaultOf (ctx, tF t)
+        | ExprIf (ctx, e1,e2,eo) -> ExprIf(ctx, eF e1, eF e2, Option.map eF eo)
+        | ExprFor (ctx, p,e1,e2) -> ExprFor(ctx, pF p, eF e1, eF e2)
+        | ExprWhile (ctx, e1,e2) -> ExprWhile(ctx, eF e1, eF e2)
+        | ExprDo (ctx, e) -> ExprDo (ctx, eF e)
+        | ExprAttribute (ctx, a,e) -> ExprAttribute (ctx, a, eF e)
+        | ExprMember (ctx, v, gs, ms, vo, p, e) -> ExprMember(ctx, v, gs, ms, vo, pF p, eF e)
+        | ExprMemberConstructor (ctx, ms, p, e) -> ExprMemberConstructor(ctx, ms, pF p, eF e)
+        | ExprMemberProperty (ctx, p, e, eo) -> ExprMemberProperty (ctx, pF p, eF e, Option.map eF eo)
+        | ExprMemberPropertyWithSet (ctx, p, e, eo, eo2) -> ExprMemberPropertyWithSet (ctx, pF p, eF e, Option.map eF eo, Option.map eF eo2)
+        | ExprInterfaceImpl (ctx, t,e) -> ExprInterfaceImpl (ctx, tF t, eF e)
+        | ExprInherit (ctx, t) -> ExprInherit (ctx, tF t)
+        | ExprWithGeneric (ctx, g,e) -> ExprWithGeneric (ctx, List.map tF g, eF e)
+        | ExprTry (ctx, e, m, ef) -> ExprTry (ctx, eF e, (m |> List.map (fun (c, p, eo, e) -> c, pF p, Option.map eF eo, eF e)), Option.map eF ef)
 
-        | ExprTypeConversion(t,e) -> ExprTypeConversion(tF t, eF e)
-        | ExprArrayInit(t,rs) -> ExprArrayInit(tF t, List.map eF rs)
-        | ExprReturn e -> ExprReturn (eF e)
+        | ExprTypeConversion(ctx, t,e) -> ExprTypeConversion(ctx, tF t, eF e)
+        | ExprArrayInit(ctx, t,rs) -> ExprArrayInit(ctx, tF t, List.map eF rs)
+        | ExprReturn (ctx, e) -> ExprReturn (ctx, eF e)
 
     let transformPat astF n = 
         let (eF, tF, pF, dF) = recFuncs astF
         match n with
-        | PatConst c -> PatConst c
-        | PatWildcard -> PatWildcard
-        | PatBind v -> PatBind v
-        | PatCons (v, ps) -> PatCons (v, List.map pF ps)
-        | PatInfixCons (p1, v, p2) -> PatInfixCons (pF p1, v, pF p2)
-        | PatTuple ps -> PatTuple (List.map pF ps)
-        | PatList ps -> PatList (List.map pF ps)
-        | PatRecord xs -> xs |> List.map (fun (fId, p) -> fId, pF p) |> PatRecord
-        | PatWithType (t, p) -> PatWithType (tF t, pF p)
-        | PatBindAs (v, p) -> PatBindAs (v, pF p)
+        | PatConst (ctx, c) -> PatConst (ctx, c)
+        | PatWildcard ctx -> PatWildcard ctx
+        | PatBind (ctx, v) -> PatBind (ctx, v)
+        | PatCons (ctx, v, ps) -> PatCons (ctx, v, List.map pF ps)
+        | PatInfixCons (ctx, p1, v, p2) -> PatInfixCons (ctx, pF p1, v, pF p2)
+        | PatTuple (ctx, ps) -> PatTuple (ctx, List.map pF ps)
+        | PatList (ctx, ps) -> PatList (ctx, List.map pF ps)
+        | PatRecord (ctx, xs) -> (ctx, xs |> List.map (fun (fId, p) -> fId, pF p)) |> PatRecord
+        | PatWithType (ctx, t, p) -> PatWithType (ctx, tF t, pF p)
+        | PatBindAs (ctx, v, p) -> PatBindAs (ctx, v, pF p)
                 
     let transformTyp astF n = 
         let (eF, tF, pF, dF) = recFuncs astF
@@ -212,16 +288,16 @@ module rec Transforms =
     let transformTypeDecl astF n = 
         let (eF, tF, pF, dF) = recFuncs astF
         match n with
-        | TypeDeclRecord xs -> xs |> List.map (fun (fId, t) -> fId, dF t) |> TypeDeclRecord
-        | TypeDeclUnion xs -> xs |> List.map (fun (fId, t) -> fId, Option.map dF t) |> TypeDeclUnion
-        | TypeDeclTuple xs -> xs |> List.map dF |> TypeDeclTuple
-        | TypeDeclClass (mods, generics, p, membs) -> (mods, generics, pF p, (membs |> List.map eF)) |> TypeDeclClass 
-        | TypeDeclId t -> TypeDeclId t
+        | TypeDeclRecord (ctx, xs) -> (ctx, xs |> List.map (fun (fId, t) -> fId, dF t)) |> TypeDeclRecord
+        | TypeDeclUnion (ctx, xs) -> (ctx, xs |> List.map (fun (fId, t) -> fId, Option.map dF t)) |> TypeDeclUnion
+        | TypeDeclTuple (ctx, xs) -> (ctx, xs |> List.map dF) |> TypeDeclTuple
+        | TypeDeclClass (ctx, mods, generics, p, membs) -> (ctx, mods, generics, pF p, (membs |> List.map eF)) |> TypeDeclClass 
+        | TypeDeclId (ctx, t) -> TypeDeclId (ctx, t)
         
     let exprMap f =
         { ASTmapF.Default with
             ExprF = f
-        } |> transformExpr
+        } |> transformExpr 
         
     let typMap f =
         { ASTmapF.Default with
@@ -235,124 +311,140 @@ module rec Transforms =
         } |> transformExpr
     let globalNamespace =
         function
-        | ExprSequence (e::es) as program ->
+        | ExprSequence (ctx, e::es) as program ->
             match e with
             | ExprNamespace _
             | ExprModule _ -> program
-            | _ -> ExprNamespace (NamespaceId "global", program)
+            | _ -> ExprNamespace (ctx, NamespaceId "global", program)
         | e -> e
     
-    let rec simplify =
-        function
-        | ExprSequence [e] -> Some e
-        | ExprSequence es -> 
-            es |> List.collect (function | ExprSequence es2 -> es2 | e -> [e])
-            |> List.map simplify
-            |> ExprSequence
-            |> Some
-        | _ -> None
-        |> exprMap
+    let rec simplify e =
+        let f =
+            function
+            | ExprSequence (ctx : 'a, [e]) -> Some e
+            | ExprSequence (ctx, es) -> 
+                let r = 
+                    es
+                    |> List.collect (function | ExprSequence (ctx, es2) -> es2 | e -> [e])
+                    |> List.map simplify
+                ExprSequence(ctx, r)
+                |> Some
+            | _ -> None
+        exprMap f e
 
-    let assignmentAsExpr =
-        function
-        | ExprInfixApp(ExprInfixApp(e1, ValId "<-", e2) as assignment, op, e3) -> 
-            Some <| ExprSequence [assignment; ExprInfixApp(e1, op, e3)]
-        | _ -> None
-        |> exprMap
+    let assignmentAsExpr e =
+        let f =
+            function
+            | ExprInfixApp(ctx1, (ExprInfixApp(ctx2, e1, ValId "<-", e2) as assignment), op, e3) -> 
+                Some <| ExprSequence (ctx1, [assignment; ExprInfixApp(ctx2, e1, op, e3)])
+            | _ -> None
+        exprMap f e
 
-    let binaryOpWithString =
-        function
-        | ExprInfixApp(ExprConst c, op, ExprTypeConversion(TypType (TypeId "obj"), e)) when constIsString c -> 
-            Some <| ExprInfixApp(ExprConst c, op, ExprTypeConversion(TypType (TypeId "string"), e))
-        | _ -> None
-        |> exprMap
+    let binaryOpWithString e =
+        let f =
+            function
+            | ExprInfixApp(ctx1, ExprConst (ctxC, c), op, ExprTypeConversion(ctx2, TypType (TypeId "obj"), e)) when constIsString c -> 
+                Some <| ExprInfixApp(ctx1, ExprConst (ctxC, c), op, ExprTypeConversion(ctx2, TypType (TypeId "string"), e))
+            | _ -> None
+        exprMap f e
 
-    let entryPoint =
+    let entryPoint e =
         let isMainMember =
             function
-            | ExprMember (ValId "Main", [], [Static], None, PatTuple [PatWithType(TypType (TypeId t), PatBind (ValId args))], _) 
+            | ExprMember (ctx1, ValId "Main", [], [Static], None, PatTuple (ctx2, [PatWithType(ctx3, TypType (TypeId t), PatBind (ctx4, ValId args))]), _) 
                 when t = "string[]" || t = "String[]" -> 
-                    Some [ExprVal (ValId args)]
-            | ExprMember (ValId "Main", [], [Static], None, PatTuple [], _) -> Some []
+                    Some (ctx1, ctx3, Some (ExprVal (ctx3, ValId args)))
+            | ExprMember (ctx1, ValId "Main", [], [Static], None, PatTuple (ctx2, []), _) -> Some (ctx1, ctx2, None)
             | _ -> None
-        function
-        | (ExprType (TypeId mainClass, TypeDeclClass (_, _, _, members))) as e ->
-            members |> Seq.choose isMainMember |> Seq.tryHead |> Option.map (fun callArgs -> 
-                let callArgsVal = function
-                    | ExprVal (ValId x) -> ValId x
-                    | _ -> ValId "args"
-                let callArgsPat = callArgs |> List.map (callArgsVal >> PatBind)
-                let mainCall = ExprApp (ExprDotApp (ExprVal (ValId mainClass), ExprVal (ValId "Main")), ExprTuple callArgs)
-                let mainBind = ExprAttribute([AttributeId "EntryPoint"], ExprBind ([], PatCons (ValId "main", callArgsPat), ExprSequence [mainCall; ExprConst (ConstId "0")]))
-                Some <| ExprSequence [e; ExprModule (ModuleId (mainClass + "__run"), mainBind)]
-            ) |> Option.fill None
-        | _ -> None
-        |> exprMapOnce
+        let f =
+            function
+            | (ExprType (ctx1, TypeId mainClass, TypeDeclClass (ctx2, _, _, _, members))) as e ->
+                members |> Seq.choose isMainMember |> Seq.tryHead |> Option.map (fun (mainCtx, ctx, callArgs) -> 
+                    let callArgsVal = function
+                        | ExprVal (ctx3, ValId x) -> ctx, ValId x
+                        | _ -> ctx, ValId "args"
+                    let callArgsPat = callArgs |> Option.map (callArgsVal >> PatBind) |> Option.toList
+                    let mainCall = ExprApp (mainCtx, ExprDotApp (mainCtx, ExprVal (ctx1, ValId mainClass), ExprVal (mainCtx, ValId "Main")), ExprTuple(ctx, callArgs |> Option.toList))
+                    let mainBind = ExprAttribute(mainCtx, [AttributeId "EntryPoint"], ExprBind (mainCtx, [], PatCons (mainCtx, ValId "main", callArgsPat), ExprSequence (mainCtx, [mainCall; ExprConst (mainCtx, ConstId "0")])))
+                    Some <| ExprSequence (mainCtx, [e; ExprModule (mainCtx, ModuleId (mainClass + "__run"), mainBind)])
+                ) |> Option.fill None
+            | _ -> None
+        exprMapOnce f e
         
-    let unitAfterSequenceWithoutValue =
-        function
-        | ExprMember (v,t,m,v2,p,e) -> 
-            let e' = if not(exprIsValue e) then ExprSequence [e; ExprVal (ValId "()")] else e
-            Some <| ExprMember (v,t,m,v2,p,e')
-        | _ -> None
-        |> exprMapOnce
+    let unitAfterSequenceWithoutValue e =
+        let f =
+            function
+            | ExprMember (ctx, v,t,m,v2,p,e) -> 
+                let e' = if not(exprIsValue e) then ExprSequence (ctx, [e; ExprVal (ctx, ValId "()")]) else e
+                Some <| ExprMember (ctx, v,t,m,v2,p,e')
+            | _ -> None
+        exprMapOnce f e
 
-    let lastReturn =
+    let lastReturn e =
         let replaceLastExpr =
             function
-            | ExprSequence es ->
+            | ExprSequence (ctx, (es:Expr<'a> list)) ->
                 match List.tryLast es with
-                | Some (ExprReturn e) -> Some <| ExprSequence((List.take ((List.length es) - 1) es |> fst) @ [e])
+                | Some (ExprReturn(ctx2, e)) ->
+                    let (take: Expr<'a> list -> Expr<'a> list) = List.take ((List.length es) - 1) >> fst
+                    let (exps:Expr<'a> list) = take es @ [e]
+                    Some <| ExprSequence(ctx, exps)
                 | _ -> None
-            | ExprReturn e -> Some e
+            | ExprReturn (ctx, e) -> Some e
             | _ -> None
-        function
-        | ExprMember _
-        | ExprMemberProperty _
-        | ExprMemberPropertyWithSet _
-        | ExprLambda _ as e -> (exprMapOnce replaceLastExpr) e |> Some
-        | _ -> None
-        |> exprMap
+        let f =            
+            function
+            | ExprMember _
+            | ExprMemberProperty _
+            | ExprMemberPropertyWithSet _
+            | ExprLambda _ as e -> (exprMapOnce replaceLastExpr) e |> Some
+            | _ -> None
+        exprMap f e
 
-    let removeUnnecessaryTypeConversion =
-        function
-        | ExprBind (modifiers, (PatWithType(t,_) as p), ExprTypeConversion(t2, e)) when t=t2 ->
-            ExprBind (modifiers, p, e) |> Some
-        | _ -> None
-        |> exprMap
+    let removeUnnecessaryTypeConversion e =
+        let f =
+            function
+            | ExprBind (ctx, modifiers, (PatWithType(_, t,_) as p), ExprTypeConversion(_, t2, e)) when t=t2 ->
+                ExprBind (ctx, modifiers, p, e) |> Some
+            | _ -> None
+        exprMap f e
     
-    let typeReplecement =
+    let typeReplacement e =
         let isOneOf xs x = xs |> Seq.exists ((=)x)
         let tupleIfMulti = function | [t] -> t | ts -> TypTuple ts
-        function
-        | TypWithGeneric(gs, TypType (TypeId t)) when t |> isOneOf ["System.Func"; "Func"] -> 
-            let (t::tup) = gs |> List.rev
-            let inputTypes = tupleIfMulti (List.rev tup)
-            TypFun (inputTypes, t) |> Some
-        | TypType (TypeId t) when t |> isOneOf ["System.Action"; "Action"] -> 
-            TypFun (tupleIfMulti [], TypType (TypeId "unit")) |> Some
-        | TypWithGeneric(gs, TypType (TypeId t)) when t |> isOneOf ["System.Action"; "Action"] -> 
-            TypFun (tupleIfMulti gs, TypType (TypeId "unit")) |> Some
-        | TypTuple [] -> TypType (TypeId "unit") |> Some
-        | TypType (TypeId "System.String") -> TypType (TypeId "string") |> Some
-        | TypType (TypeId "System.Int32") -> TypType (TypeId "int") |> Some
-        | TypType (TypeId "System.Double") -> TypType (TypeId "float") |> Some
-        | _ -> None
-        |> typMap
+        let f =
+            function
+            | TypWithGeneric(gs, TypType (TypeId t)) when t |> isOneOf ["System.Func"; "Func"] -> 
+                let (t::tup) = gs |> List.rev
+                let inputTypes = tupleIfMulti (List.rev tup)
+                TypFun (inputTypes, t) |> Some
+            | TypType (TypeId t) when t |> isOneOf ["System.Action"; "Action"] -> 
+                TypFun (tupleIfMulti [], TypType (TypeId "unit")) |> Some
+            | TypWithGeneric(gs, TypType (TypeId t)) when t |> isOneOf ["System.Action"; "Action"] -> 
+                TypFun (tupleIfMulti gs, TypType (TypeId "unit")) |> Some
+            | TypTuple [] -> TypType (TypeId "unit") |> Some
+            | TypType (TypeId "System.String") -> TypType (TypeId "string") |> Some
+            | TypType (TypeId "System.Int32") -> TypType (TypeId "int") |> Some
+            | TypType (TypeId "System.Double") -> TypType (TypeId "float") |> Some
+            | _ -> None
+        typMap f e
 
-    let constReplacement =
-        function
-        | ExprConst (ConstId "null") -> 
-            ExprConst (ConstId "Unchecked.defaultof<_>") |> Some
-        | ExprInfixApp (e1, ValId "as" , e2) -> ExprInfixApp (e1, ValId ":?>" , e2) |> Some
-        | ExprInfixApp (e1, ValId "is" , e2) -> ExprInfixApp (e1, ValId ":?" , e2) |> Some
-        | _ -> None
-        |> exprMap
+    let constReplacement e =
+        let f =
+            function
+            | ExprConst (ctx, ConstId "null") -> 
+                ExprConst (ctx, ConstId "Unchecked.defaultof<_>") |> Some
+            | ExprInfixApp (ctx, e1, ValId "as" , e2) -> ExprInfixApp (ctx, e1, ValId ":?>" , e2) |> Some
+            | ExprInfixApp (ctx, e1, ValId "is" , e2) -> ExprInfixApp (ctx, e1, ValId ":?" , e2) |> Some
+            | _ -> None
+        exprMap f e
 
 module Mk =
     open cs2fs.FSharpDefs
     let mkValId id =
         let id = if Set.contains id fsharpKeywords then "``" + id + "``" else id
         ValId id
-    let mkExprVal = ExprVal << mkValId
-    let mkPatBind = PatBind << mkValId
+    let mkExprVal ctx n = ExprVal(ctx, mkValId n)
+    let mkPatBind ctx n = PatBind(ctx, mkValId n)
+
+    let mkError ctx = ExprError(ctx)
