@@ -1,41 +1,26 @@
-// include Fake libs
-#r "./packages/FAKE/tools/FakeLib.dll"
+#load ".fake/build.fsx/intellisense.fsx"
+open Fake.Core
+open Fake.DotNet
+open Fake.IO
+open Fake.IO.FileSystemOperators
+open Fake.IO.Globbing.Operators
+open Fake.Core.TargetOperators
 
-open Fake
-
-// Directories
-let buildDir  = "./build/"
-let deployDir = "./deploy/"
-
-
-// Filesets
-let appReferences  =
-    !! "/**/*.csproj"
-    ++ "/**/*.fsproj"
-
-// version info
-let version = "0.1"  // or retrieve from CI server
-
-// Targets
-Target "Clean" (fun _ ->
-    CleanDirs [buildDir; deployDir]
+Target.create "Clean" (fun _ ->
+    !! "src/**/bin"
+    ++ "src/**/obj"
+    |> Shell.cleanDirs 
 )
 
-Target "Build" (fun _ ->
-    DotNetCli.Restore id
-    DotNetCli.Build (fun p -> {p with Output = buildDir})
+Target.create "Build" (fun _ ->
+    !! "src/**/*.*proj"
+    |> Seq.iter (DotNet.build id)
 )
 
-Target "Deploy" (fun _ ->
-    !! (buildDir + "/**/*.*")
-    -- "*.zip"
-    |> Zip buildDir (deployDir + "ApplicationName." + version + ".zip")
-)
+Target.create "All" ignore
 
-// Build order
-//"Clean" ==>
-"Build" ==>
-"Deploy"
+"Clean"
+  ==> "Build"
+  ==> "All"
 
-// start build
-RunTargetOrDefault "Build"
+Target.runOrDefault "All"

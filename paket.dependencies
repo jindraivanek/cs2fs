@@ -1,4 +1,4 @@
-source https://www.nuget.org/api/v2
+source https://api.nuget.org/v3/index.json
 framework: netstandard2.0, netcoreapp2.0
 //nuget ExtCore
 github jack-pappas/ExtCore
@@ -10,3 +10,11 @@ github kekyo/Microsoft.CodeAnalysis.ActivePatterns:f9bc559e48252d474bea484ec9e21
 nuget Expecto
 nuget FSharp.Compiler.Tools
 nuget Microsoft.Net.Compilers
+
+// [ FAKE GROUP ]
+group Build
+    storage none
+    source https://api.nuget.org/v3/index.json
+    nuget Fake.DotNet.Cli
+    nuget Fake.IO.FileSystem
+    nuget Fake.Core.Target
