@@ -639,7 +639,7 @@ NUGET
       System.Memory (>= 4.5) - restriction: || (&& (< net46) (< netcoreapp2.0) (>= netstandard2.0) (< xamarinios)) (&& (>= netcoreapp2.0) (< netcoreapp2.1)) (>= uap10.1)
       System.Security.AccessControl (>= 4.5) - restriction: || (&& (>= monoandroid) (< netstandard2.0)) (>= monotouch) (&& (< net46) (>= netstandard2.0)) (>= net461) (>= netcoreapp2.0) (>= xamarinios) (>= xamarinmac) (>= xamarintvos) (>= xamarinwatchos)
       System.Security.Principal.Windows (>= 4.5) - restriction: || (&& (>= monoandroid) (< netstandard2.0)) (>= monotouch) (&& (< net46) (>= netstandard2.0)) (>= net461) (>= netcoreapp2.0) (>= xamarinios) (>= xamarinmac) (>= xamarintvos) (>= xamarinwatchos)
-    MSBuild.StructuredLogger (2.0.11) - restriction: || (>= net462) (>= netstandard2.0)
+    MSBuild.StructuredLogger (2.0.61) - restriction: || (>= net462) (>= netstandard2.0)
       Microsoft.Build (>= 14.3) - restriction: >= net46
       Microsoft.Build (>= 15.8.166) - restriction: && (< net46) (>= netstandard2.0)
       Microsoft.Build.Framework (>= 14.3) - restriction: >= net46
