@@ -17,10 +17,16 @@ Target.create "Build" (fun _ ->
     |> Seq.iter (DotNet.build id)
 )
 
+Target.create "Pack" (fun _ ->
+    !! "src/**/*.*proj"
+    |> Seq.iter (DotNet.pack (fun p -> {p with OutputPath = Some "../../source"}))
+)
+
 Target.create "All" ignore
 
 "Clean"
   ==> "Build"
+  ==> "Pack"
   ==> "All"
 
 Target.runOrDefault "All"
