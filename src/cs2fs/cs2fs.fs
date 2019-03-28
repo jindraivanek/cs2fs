@@ -127,7 +127,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             | _ ->
                 getTypeInfo n
         let tt = genericConvert <| TypType (TypeId t)
-        gs |> Option.map (fun g -> TypWithGeneric(List.map genericConvert g, tt)) |> Option.fill tt
+        gs |> Option.map (fun g -> TypWithGeneric(List.map genericConvert g, tt)) |> Option.defaultValue tt
     let getTypeAbbr genericSet (n:Syntax.TypeSyntax) cons x =
         match n with
         | null -> x
@@ -150,7 +150,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
     
     let getParameters = function
         | ParameterListSyntax(_, prms, _) ->
-            if isNull prms then [] else prms
+            //if isNull prms then [] else 
+            prms
         | _ -> [] 
 
     let printParamaterList generics ps = 
@@ -226,7 +227,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
                let (t,gs) = getConvertedType n
                if Set.contains t ignoredConvs then None else 
                    let tt = TypeId t |> TypType
-                   Some (gs |> Option.map (fun g -> TypWithGeneric(g,tt)) |> Option.fill tt) 
+                   Some (gs |> Option.map (fun g -> TypWithGeneric(g,tt)) |> Option.defaultValue tt) 
            else None
         typ
 
@@ -236,7 +237,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         |> Seq.toList
         |> Option.conditional (List.isEmpty attrs |> not)
     let applyAttributes (attrs) (e:Expr<'a>) : Expr<'a> =
-        getAttributes attrs |> Option.map (fun l -> ExprAttribute (e.Context, l |> List.map snd, e)) |> Option.fill e
+        getAttributes attrs |> Option.map (fun l -> ExprAttribute (e.Context, l |> List.map snd, e)) |> Option.defaultValue e
 
     let getVariableDeclarators n = 
         match n with
@@ -295,7 +296,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             | [] -> ConvertResults.Empty, []
             | ["get", getBlock] -> 
                 let getBlockO = descendToOption getBlock
-                getBlockO |> Option.map fst |> Option.fill ConvertResults.Empty |> combineResults r,
+                getBlockO |> Option.map fst |> Option.defaultValue ConvertResults.Empty |> combineResults r,
                 [ExprMemberProperty (n, propPat, init, getBlockO |> Option.map snd) |> applyAttributes attrs]
             | ["get", getBlock; "set", setBlock] -> 
                 let getBlockO = descendToOption getBlock
@@ -453,7 +454,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
                 identInfo.Symbol |> Option.ofObj
                 |> Option.bind (fun symbol -> Option.ofObj symbol.ContainingSymbol)
                 |> Option.map (fun containing -> containing.Name = thisClassName && not(text.StartsWith("this.")))
-                |> Option.fill false
+                |> Option.defaultValue false
             let prefix = if isThis then (if identInfo.Symbol.IsStatic then thisClassName+"." else "this.") else ""
             
             ConvertResults.Empty,
@@ -501,7 +502,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             ExprFor (node, mkPatBind node ident |> getTypePat (set[]) typ, e, stmt)
         | ForStatementSyntax(varDecl, initActions, cond, postActions, stmt) ->
             let binds = varDecl |> Option.ofObj |> Option.map getVariableDeclarators 
-            let bindsExpr = binds |> Option.map (Seq.map (fun (r, p, e) -> r, ExprBind(node, getMutableModifier varDecl, p, e)) >> Seq.toList) |> Option.fill []
+            let bindsExpr = binds |> Option.map (Seq.map (fun (r, p, e) -> r, ExprBind(node, getMutableModifier varDecl, p, e)) >> Seq.toList) |> Option.defaultValue []
             let initExpr = bindsExpr @ (initActions |> Seq.map descend |> Seq.toList) |> sequenceTree node
             let whileExpr =
                 let bodyRes, bodyExpr = [descend stmt] @ (postActions |> Seq.map descend |> Seq.toList) |> sequenceTree node
@@ -544,7 +545,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
                     (catchNode, ident |> getTypePat (set[]) t |> typeCheckPat, exprFilterO |> Option.map snd, block)
 
             let catches = catches |> List.map getMatch
-            let finallyBodyO = finallyBody |> Option.ofNull |> Option.map descend
+            let finallyBodyO = finallyBody |> Option.ofObj |> Option.map descend
             let bodyRes, body = descend body
             [ yield! catches |> Seq.map (fst >> Some); yield finallyBodyO |> Option.map fst; yield Some bodyRes ] |> Seq.choose id |> collectResults,
             ExprTry(node, body, catches |> List.map snd, finallyBodyO |> Option.map snd)
@@ -597,7 +598,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         implicitConv node |> Option.map (fun t ->
             let res, desc = descendNoImplicit node
             res, ExprTypeConversion (node, t, desc)) 
-        |> Option.fillWith (fun () -> exprF node)
+        |> Option.defaultWith (fun () -> exprF node)
     else exprF node
     with 
     | MissingCase msg -> eprintfn "%s" msg; reraise()

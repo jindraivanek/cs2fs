@@ -10,7 +10,8 @@
       <Paket>True</Paket>
       <Link>paket-files/CSharpActivePatterns.fs</Link>
     </Compile>
-    <ProjectReference Include="..\..\paket-files\jack-pappas\ExtCore\ExtCore\ExtCore.fsproj" />
+    <Compile Include="..\..\paket-files\jack-pappas\ExtCore\ExtCore\Pervasive.fs" />
+    <!-- <ProjectReference Include="..\..\paket-files\jack-pappas\ExtCore\ExtCore\ExtCore.fsproj" /> -->
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Utils.fs" />

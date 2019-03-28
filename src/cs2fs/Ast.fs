@@ -1,4 +1,5 @@
 module cs2fs.AST
+open cs2fs.Utils
 
 type NamespaceId = NamespaceId of string
 type ModuleId = ModuleId of string
@@ -206,7 +207,7 @@ let rec exprIsValue =
     | ExprSequence (_,es) -> es |> List.last |> exprIsValue
     | _ -> false
 
-let applyAstF recurse f recF n = f n |> Option.map (if recurse then recF else id) |> Option.fillWith (fun () -> recF n) 
+let applyAstF recurse f recF n = f n |> Option.map (if recurse then recF else id) |> Option.defaultWith (fun () -> recF n) 
 
 module rec Transforms =
     let recFuncs astF = 
@@ -367,7 +368,7 @@ module rec Transforms =
                     let mainCall = ExprApp (mainCtx, ExprDotApp (mainCtx, ExprVal (ctx1, ValId mainClass), ExprVal (mainCtx, ValId "Main")), ExprTuple(ctx, callArgs |> Option.toList))
                     let mainBind = ExprAttribute(mainCtx, [AttributeId "EntryPoint"], ExprBind (mainCtx, [], PatCons (mainCtx, ValId "main", callArgsPat), ExprSequence (mainCtx, [mainCall; ExprConst (mainCtx, ConstId "0")])))
                     Some <| ExprSequence (mainCtx, [e; ExprModule (mainCtx, ModuleId (mainClass + "__run"), mainBind)])
-                ) |> Option.fill None
+                ) |> Option.defaultValue None
             | _ -> None
         exprMapOnce f e
         
@@ -386,7 +387,7 @@ module rec Transforms =
             | ExprSequence (ctx, (es:Expr<'a> list)) ->
                 match List.tryLast es with
                 | Some (ExprReturn(ctx2, e)) ->
-                    let (take: Expr<'a> list -> Expr<'a> list) = List.take ((List.length es) - 1) >> fst
+                    let (take: Expr<'a> list -> Expr<'a> list) = List.take ((List.length es) - 1)
                     let (exps:Expr<'a> list) = take es @ [e]
                     Some <| ExprSequence(ctx, exps)
                 | _ -> None
