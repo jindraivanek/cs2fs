@@ -179,6 +179,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         | :? Syntax.MethodDeclarationSyntax as n -> n.Modifiers |> Seq.toList
         | :? Syntax.FieldDeclarationSyntax as n -> n.Modifiers |> Seq.toList
         | :? Syntax.LocalDeclarationStatementSyntax as n -> n.Modifiers |> Seq.toList
+        | :? Syntax.PropertyDeclarationSyntax as n -> n.Modifiers |> Seq.toList
         | _ -> []
         
     let hasModifier t n = getTextModifiers n |> List.exists (fun (m:SyntaxToken) -> m.ValueText = t)
@@ -291,30 +292,29 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
                 accessors |> List.map (fun (AccessorDeclarationSyntax(attrs, SyntaxToken keyword, block, _)) ->
                     keyword, Option.ofObj block)
             let (propPat, (r, init)) = mkPatBind n ident |> getTypePat (set[]) typ, defInit typ
-            
             match accs with
             | [] -> ConvertResults.Empty, []
             | ["get", getBlock] -> 
                 let getBlockO = descendToOption getBlock
                 getBlockO |> Option.map fst |> Option.defaultValue ConvertResults.Empty |> combineResults r,
-                [ExprMemberProperty (n, propPat, init, getBlockO |> Option.map snd) |> applyAttributes attrs]
+                [ExprMemberProperty (n, getModifiers n, propPat, init, getBlockO |> Option.map snd) |> applyAttributes attrs]
             | ["get", getBlock; "set", setBlock] -> 
                 let getBlockO = descendToOption getBlock
                 let setBlockO = descendToOption setBlock
 
                 [ yield getBlockO |> Option.map fst; yield setBlockO |> Option.map fst; yield Some r ] |> Seq.choose id |> collectResults,
-                [ExprMemberPropertyWithSet (n, propPat, init, getBlockO |> Option.map snd, setBlockO |> Option.map snd) |> applyAttributes attrs]
+                [ExprMemberPropertyWithSet (n, getModifiers n, propPat, init, getBlockO |> Option.map snd, setBlockO |> Option.map snd) |> applyAttributes attrs]
             | _ -> let r, e = unknownNode n in r, [ e ]
 
             
-        | FieldDeclarationSyntax(attrs,varDecl,_) as n -> 
+        | FieldDeclarationSyntax(attrs,varDecl,_) -> 
             let binds = getVariableDeclarators varDecl
             let results =
                 binds |> Seq.map (fun (r, p, e) ->
                     r, 
                     if hasModifier "readonly" n then
-                        ExprMemberProperty (varDecl:>SyntaxNode, p, e, None)
-                    else ExprMemberPropertyWithSet (varDecl:>SyntaxNode, p, e, None, None)
+                        ExprMemberProperty (varDecl:>SyntaxNode, getModifiers n, p, e, None)
+                    else ExprMemberPropertyWithSet (varDecl:>SyntaxNode, getModifiers n, p, e, None, None)
                      |> applyAttributes attrs
                 ) |> Seq.toList
             results |> List.map fst |> collectResults,

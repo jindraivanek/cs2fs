@@ -103,8 +103,8 @@ and Expr<'TContext> =
 
     | ExprMember of 'TContext * ValId * Typ list * Modifier list * ValId option * Pat<'TContext> * Expr<'TContext>
     | ExprMemberConstructor of 'TContext * Modifier list * Pat<'TContext> * Expr<'TContext>
-    | ExprMemberProperty of 'TContext * Pat<'TContext> * Expr<'TContext> * Expr<'TContext> option
-    | ExprMemberPropertyWithSet of 'TContext * Pat<'TContext> * Expr<'TContext> * Expr<'TContext> option * Expr<'TContext> option
+    | ExprMemberProperty of 'TContext * Modifier list * Pat<'TContext> * Expr<'TContext> * Expr<'TContext> option
+    | ExprMemberPropertyWithSet of 'TContext * Modifier list * Pat<'TContext> * Expr<'TContext> * Expr<'TContext> option * Expr<'TContext> option
     | ExprInterfaceImpl of 'TContext * Typ * Expr<'TContext>
     | ExprInherit of 'TContext * Typ
 
@@ -149,8 +149,8 @@ and Expr<'TContext> =
 
         | ExprMember (ctx, _, _, _, _, _, _)
         | ExprMemberConstructor(ctx, _, _, _)
-        | ExprMemberProperty(ctx, _, _, _)
-        | ExprMemberPropertyWithSet (ctx, _, _, _, _)
+        | ExprMemberProperty(ctx, _, _, _, _)
+        | ExprMemberPropertyWithSet (ctx, _, _, _, _, _)
         | ExprInterfaceImpl (ctx, _, _)
         | ExprInherit(ctx, _)
 
@@ -252,8 +252,8 @@ module rec Transforms =
         | ExprAttribute (ctx, a,e) -> ExprAttribute (ctx, a, eF e)
         | ExprMember (ctx, v, gs, ms, vo, p, e) -> ExprMember(ctx, v, gs, ms, vo, pF p, eF e)
         | ExprMemberConstructor (ctx, ms, p, e) -> ExprMemberConstructor(ctx, ms, pF p, eF e)
-        | ExprMemberProperty (ctx, p, e, eo) -> ExprMemberProperty (ctx, pF p, eF e, Option.map eF eo)
-        | ExprMemberPropertyWithSet (ctx, p, e, eo, eo2) -> ExprMemberPropertyWithSet (ctx, pF p, eF e, Option.map eF eo, Option.map eF eo2)
+        | ExprMemberProperty (ctx, ms, p, e, eo) -> ExprMemberProperty (ctx, ms, pF p, eF e, Option.map eF eo)
+        | ExprMemberPropertyWithSet (ctx, ms, p, e, eo, eo2) -> ExprMemberPropertyWithSet (ctx, ms, pF p, eF e, Option.map eF eo, Option.map eF eo2)
         | ExprInterfaceImpl (ctx, t,e) -> ExprInterfaceImpl (ctx, tF t, eF e)
         | ExprInherit (ctx, t) -> ExprInherit (ctx, tF t)
         | ExprWithGeneric (ctx, g,e) -> ExprWithGeneric (ctx, List.map tF g, eF e)

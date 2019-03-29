@@ -173,9 +173,13 @@ let getExprMain errorPrinter e =
         [getPat p |++| whenClause; getExprM e] |> delimText " -> "
 
     and getMember className x =
-        let property pat init getter (haveSetter, setter) =
+        let property modifiers pat init getter (haveSetter, setter) =
             let isAutoProperty = Option.isNone getter && (not haveSetter || Option.isNone setter)
-            let header = Text (if isAutoProperty then  "member val " else "member this.") |++| getPatNoType pat |++| (if isAutoProperty then Text " = " |++| getExpr init else Text "")
+            let header = 
+                getModifiersOfGroup 1 modifiers 
+                |++| Text (if isAutoProperty then  "member val " else "member this.") 
+                |++| getModifiersOfGroup 2 modifiers 
+                |++| getPatNoType pat |++| (if isAutoProperty then Text " = " |++| getExpr init else Text "")
             let getterText =
                 getter |> Option.map (fun e -> Line |+>| (Text "with get() = " |++| Line |+>| getExpr e))
                 |> Option.fill (Text "")
@@ -193,8 +197,10 @@ let getExprMain errorPrinter e =
             let init = ExprApp (ctx, ExprVal (ctx, ValId className), ExprTuple (ctx, []))
             getModifiersOfGroup 1 modifiers |++| getModifiersOfGroup 2 modifiers |++| Text "new"
             |++| getPat args |++| Text " as this = " |++| Line |+>| (getExpr init |++| Line |++| Text "then" |++| Line |+>| getExpr expr)
-        | ExprMemberProperty (_, pat, init, getter) -> property pat init getter (false, None)
-        | ExprMemberPropertyWithSet (_, pat, init, getter, setter) -> property pat init getter (true, setter)
+        | ExprMemberProperty (_, modifiers, pat, init, getter) -> 
+            property modifiers pat init getter (false, None)
+        | ExprMemberPropertyWithSet (_, modifiers, pat, init, getter, setter) -> 
+            property modifiers pat init getter (true, setter)
         | ExprInterfaceImpl (_, t, e) -> Text "interface " |++| getTyp t |++| Text " with" |++| Line |+>| getExpr e
         | ExprInherit (_, t)  -> Text "inherit " |++| getTyp t |++| Text "()"
         | ExprAttribute (_, attrs, e) ->
