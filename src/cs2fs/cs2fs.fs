@@ -607,9 +607,9 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
 
 let convert (csTree: SyntaxTree) =
     let (@@) x y = System.IO.Path.Combine(x,y)
-    let mscorlibPath = (System.AppContext.GetData("FX_DEPS_FILE") |> string |> System.IO.DirectoryInfo).Parent.FullName @@ "mscorlib.dll"
-    let mscorlib = MetadataReference.CreateFromFile(mscorlibPath)
-    let compilation = CSharpCompilation.Create("MyCompilation", syntaxTrees = [| csTree |], references = [| mscorlib |])
+    //let mscorlibPath = (System.AppContext.GetData("FX_DEPS_FILE") |> string |> System.IO.DirectoryInfo).Parent.FullName @@ "mscorlib.dll"
+    //let mscorlib = MetadataReference.CreateFromFile(mscorlibPath)
+    let compilation = CSharpCompilation.Create("MyCompilation", syntaxTrees = [| csTree |], references = [| |])
     let model = compilation.GetSemanticModel(csTree, true)
     csTree.GetRoot() |> convertNode true model
 
