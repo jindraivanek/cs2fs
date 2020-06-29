@@ -575,7 +575,9 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
                 cases |> List.collect (fun (SwitchSectionSyntax(labels, stmts) as switchNode) -> 
                     labels |> List.map (function 
                         | :? CaseSwitchLabelSyntax as l -> l :> SyntaxNode, l.Value.ToString().Trim()
-                        | :? DefaultSwitchLabelSyntax as l -> l :> SyntaxNode, "_")
+                        | :? DefaultSwitchLabelSyntax as l -> l :> SyntaxNode, "_"
+                        | :? CasePatternSwitchLabelSyntax as l -> l :> SyntaxNode, l.Pattern.ToString()
+                        | _ as l ->  l :> SyntaxNode, Mk.mkError node |> sprintf "%A")
                     |> List.map (fun (l, x) -> 
                         let results, expr = stmts |> List.map descend |> sequenceTree node
                         results,
