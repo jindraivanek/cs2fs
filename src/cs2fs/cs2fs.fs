@@ -322,6 +322,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             results |> List.map snd           
         
         | ClassDeclarationSyntax _ as n -> let res, e = exprF n in res, [ e ]
+        | StructDeclarationSyntax _ as n -> let res, e = exprF n in res, [ e ]
         | _ -> let r, e = unknownNode n in r, [ e ]
 
     and exprF (node: SyntaxNode) : ConvertResults * Expr<SyntaxNode> =
@@ -342,6 +343,21 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         
             combineResults results1 results2,
             ExprNamespace (node, NamespaceId <| name.ToString(), [ usings; members ] |> sequence node)
+        | StructDeclarationSyntax(attrs,keyword,SyntaxToken ident,typePars, basesIn,constrs,_,members,_,_) as n ->
+            let c = n :?> Syntax.StructDeclarationSyntax
+            let s = model.GetDeclaredSymbol(c)
+            let gs = getGenerics typePars
+            
+            let members = members |> List.map (getMembers gs)
+
+            members |> Seq.map fst |> collectResults,
+            ExprType (n, TypeId ident,
+                TypeDeclClass (n, getModifiers node, gs, PatTuple(n, []), (members |> List.collect snd)))
+            |> applyAttributes attrs
+            |> function
+                | ExprAttribute (c, attrs, e) -> ExprAttribute (c, AttributeId "Struct" :: attrs, e)
+                | e -> ExprAttribute (e.Context, AttributeId "Struct" :: [], e)
+                
         | ClassDeclarationSyntax(attrs,keyword,SyntaxToken ident,typePars, basesIn,constrs,_,members,_,_) as n ->
             let c = n :?> Syntax.ClassDeclarationSyntax
             let s = model.GetDeclaredSymbol(c)
@@ -370,7 +386,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             ExprType (n, TypeId ident,
                 TypeDeclClass (n, getModifiers node, gs, PatTuple(n, []), inheritMembers @ (members |> List.collect snd) @ interfaceMembers))
             |> applyAttributes attrs
-
+        
+        
         | MethodDeclarationSyntax _ as n -> 
             let results, members = getMembers [] n
             results,
