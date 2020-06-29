@@ -58,6 +58,7 @@ type ErrorType =
     | UnknownPostfixOperator of string
     | BreakNotSupported
     | ContinueNotSupported
+    | GotoNotSupported
     | UnknownNode
 
 type ConvertError =
@@ -591,6 +592,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         // not supported syntax
         | BreakStatementSyntax _ -> ErrorType.BreakNotSupported |> createError node |> fromError, Mk.mkError node
         | ContinueStatementSyntax _ -> ErrorType.ContinueNotSupported |> createError node |> fromError, Mk.mkError node
+        | GotoStatementSyntax _ -> ErrorType.GotoNotSupported |> createError node |> fromError, Mk.mkError node
         
         | _ -> unknownNode node
             //raise (misssingCaseExpr node |> ErrorMsg.Error |> MissingCase)
@@ -632,7 +634,7 @@ let convertText (csharp:string) =
             | xs -> sprintf "%A" xs)
         |> Option.defaultValue ""
     
-    let blockExpr = expr |> cs2fs.FSharpOutput.toFs (fun node -> sprintf "%A" (resultErrorsMap.[node] |> Seq.head |> fun x -> x.Type))
+    let blockExpr = expr |> cs2fs.FSharpOutput.toFs (fun node -> sprintf "%A %A %A" (resultErrorsMap.[node] |> Seq.head |> fun x -> x.Type) (node.GetType().Name) (resultErrorsMap.[node] |> Seq.head |> fun x -> x.ProblematicNode))
     let output = blockExpr |> cs2fs.FSharpOutput.printBlock
 
     output
