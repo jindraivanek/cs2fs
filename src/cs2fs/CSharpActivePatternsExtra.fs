@@ -79,3 +79,9 @@ let (|ForStatementSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
     | :? Microsoft.CodeAnalysis.CSharp.Syntax.ForStatementSyntax as node ->
       Some (node.Declaration, node.Initializers |> Seq.toList, node.Condition, node.Incrementors |> Seq.toList, node.Statement)
     | _ -> None
+
+let (|LocalFunctionStatementSyntax|_|) (node:Microsoft.CodeAnalysis.SyntaxNode) =
+    match node with
+    | :? Microsoft.CodeAnalysis.CSharp.Syntax.LocalFunctionStatementSyntax as node ->
+      Some (node.Identifier, node.ReturnType, node.TypeParameterList, node.ParameterList, node.ConstraintClauses |> Seq.toList, node.Body, node.ExpressionBody)
+    | _ -> None

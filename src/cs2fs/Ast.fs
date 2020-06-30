@@ -80,9 +80,9 @@ and Expr<'TContext> =
     | ExprArray of 'TContext * Expr<'TContext> list
     | ExprRecord of 'TContext * Expr<'TContext> option * (FieldId * Expr<'TContext>) list // recordToCopy, fields
     | ExprSequence of 'TContext * Expr<'TContext> list // command1; commmand2; Expr
-    | ExprBind of 'TContext * Modifier list * Pat<'TContext> * Expr<'TContext> // let x = expr1
-    | ExprUseBind of 'TContext * Pat<'TContext> * Expr<'TContext>
-    | ExprRecBind of 'TContext * (Pat<'TContext> * Expr<'TContext>) list
+    | ExprBind of 'TContext * Modifier list * Pat<'TContext> list * Expr<'TContext> // let x = expr1
+    | ExprUseBind of 'TContext * Pat<'TContext> list * Expr<'TContext>
+    | ExprRecBind of 'TContext * (Pat<'TContext> list * Expr<'TContext>) list
     | ExprMatch of 'TContext * Expr<'TContext> * Match<'TContext> list
     | ExprMatchLambda of 'TContext * Match<'TContext> list
     | ExprLambda of 'TContext * Pat<'TContext> list * Expr<'TContext>
@@ -233,8 +233,8 @@ module rec Transforms =
         | ExprArray (ctx, es) -> ExprArray(ctx, es |> List.map eF)
         | ExprRecord (ctx, me, fields) -> (ctx, (Option.map eF me), (fields |> List.map (fun (f, e) -> f, eF e))) |> ExprRecord
         | ExprSequence (ctx, es) -> ExprSequence(ctx, es |> List.map eF) 
-        | ExprBind (ctx, m, p, e) -> (ctx, m, pF p, eF e) |> ExprBind
-        | ExprUseBind (ctx, p, e) -> (ctx, pF p, eF e) |> ExprUseBind
+        | ExprBind (ctx, m, p, e) -> (ctx, m, List.map pF p, eF e) |> ExprBind
+        | ExprUseBind (ctx, p, e) -> (ctx, List.map pF p, eF e) |> ExprUseBind
         | ExprRecBind (ctx, xs) -> (ctx, xs |> List.map (fun (p, e) -> p, eF e)) |> ExprRecBind
         | ExprMatch (ctx, e, m) -> (ctx, eF e, (m |> List.map (fun (c, p, eo, e) -> c, pF p, Option.map eF eo, eF e))) |> ExprMatch
         | ExprMatchLambda (ctx, m) -> ExprMatchLambda (ctx, m |> List.map (fun (c, p, eo, e) -> c, pF p, Option.map eF eo, eF e))
@@ -366,7 +366,7 @@ module rec Transforms =
                         | _ -> ctx, ValId "args"
                     let callArgsPat = callArgs |> Option.map (callArgsVal >> PatBind) |> Option.toList
                     let mainCall = ExprApp (mainCtx, ExprDotApp (mainCtx, ExprVal (ctx1, ValId mainClass), ExprVal (mainCtx, ValId "Main")), ExprTuple(ctx, callArgs |> Option.toList))
-                    let mainBind = ExprAttribute(mainCtx, [AttributeId "EntryPoint"], ExprBind (mainCtx, [], PatCons (mainCtx, ValId "main", callArgsPat), ExprSequence (mainCtx, [mainCall; ExprConst (mainCtx, ConstId "0")])))
+                    let mainBind = ExprAttribute(mainCtx, [AttributeId "EntryPoint"], ExprBind (mainCtx, [], [PatCons (mainCtx, ValId "main", callArgsPat)], ExprSequence (mainCtx, [mainCall; ExprConst (mainCtx, ConstId "0")])))
                     Some <| ExprSequence (mainCtx, [e; ExprModule (mainCtx, ModuleId (mainClass + "__run"), mainBind)])
                 ) |> Option.defaultValue None
             | _ -> None
@@ -405,8 +405,8 @@ module rec Transforms =
     let removeUnnecessaryTypeConversion e =
         let f =
             function
-            | ExprBind (ctx, modifiers, (PatWithType(_, t,_) as p), ExprTypeConversion(_, t2, e)) when t=t2 ->
-                ExprBind (ctx, modifiers, p, e) |> Some
+            | ExprBind (ctx, modifiers, [PatWithType(_, t,_) as p], ExprTypeConversion(_, t2, e)) when t=t2 ->
+                ExprBind (ctx, modifiers, [p], e) |> Some
             | _ -> None
         exprMap f e
     

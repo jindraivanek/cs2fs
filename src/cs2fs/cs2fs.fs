@@ -142,7 +142,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         let genericSet = generics |> Seq.choose (function | TypGeneric (GenericId g) -> Some g | _ -> None) |> set
         let optionalValueExpr = 
             if isNull equalsValue then None else
-                ExprBind (node, [], ident |> mkPatBind node,  
+                ExprBind (node, [], [ident |> mkPatBind node],  
                     ExprApp(node, ExprApp (node, mkExprVal node "defaultArg", mkExprVal node ident), (node, equalsValue.Value.ToFullString().Trim() |> ConstId) |> ExprConst))
                 |> Some
         let bind = mkPatBind (node:SyntaxNode) ident 
@@ -404,6 +404,10 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         | SimpleLambdaExpressionSyntax(_, par, _, e) -> let res, desc = descend e in res, ExprLambda(node, [getParameterSyntax [] par |> fst], desc)
         | ParenthesizedLambdaExpressionSyntax(_, pars, _, e) -> let res, desc = descend e in res, ExprLambda(node, [printParamaterList [] pars |> fst], desc)
         | AnonymousMethodExpressionSyntax(_, _, _, pars, body) -> let res, desc = descend body in res, ExprLambda (node, [printParamaterList [] pars |> fst], desc)
+        | LocalFunctionStatementSyntax(SyntaxToken ident, typ, typPar, pars, clauses, body, arrowExpr) ->
+            let modifiers = getModifiers node
+            let res, desc = descend body
+            res, ExprBind (node, modifiers, mkPatBind node ident :: [printParamaterList [] pars |> fst], desc)
         | InvocationExpressionSyntax(e, args) -> 
             let res, desc = descend e 
             let res2, args = printArgumentList (args :> SyntaxNode)
@@ -489,7 +493,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         | ParenthesizedExpressionSyntax(_,e,_) -> descend e
         | LocalDeclarationStatementSyntax(isConst, varDecl, _) as n->
             let binds = getVariableDeclarators varDecl
-            binds |> Seq.map (fun (r, p, e) -> r, ExprBind(varDecl :> SyntaxNode, getMutableModifier n, p, e)) |> sequenceTree node
+            binds |> Seq.map (fun (r, p, e) -> r, ExprBind(varDecl :> SyntaxNode, getMutableModifier n, [p], e)) |> sequenceTree node
         
         | EqualsValueClauseSyntax(_, value) -> descend value
         
@@ -501,11 +505,11 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             ExprApp (node, ExprApp (node, mkExprVal node "lock", e), ExprLambda (node, [PatTuple (node,[])], stmt))
         | UsingStatementSyntax(_, _, decl, e, _, stmt) ->
             let binds = getVariableDeclarators decl
-            binds |> Seq.map (fun (r, p, e) -> r, ExprUseBind(decl :> SyntaxNode, p, e)) |> sequenceTree node
+            binds |> Seq.map (fun (r, p, e) -> r, ExprUseBind(decl :> SyntaxNode, [p], e)) |> sequenceTree node
             |> (fun (r, e) -> 
                 let res, stmt = descend stmt
                 combineResults res r,
-                ExprBind (node, [], mkPatBind node "__", [e; stmt] |> sequence node))
+                ExprBind (node, [], [mkPatBind node "__"], [e; stmt] |> sequence node))
         | WhileStatementSyntax(_, _, e, _, stmt) ->
             let res1, stmt = descend stmt
             let res2, e = descend e
@@ -520,7 +524,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             ExprFor (node, mkPatBind node ident |> getTypePat (set[]) typ, e, stmt)
         | ForStatementSyntax(varDecl, initActions, cond, postActions, stmt) ->
             let binds = varDecl |> Option.ofObj |> Option.map getVariableDeclarators 
-            let bindsExpr = binds |> Option.map (Seq.map (fun (r, p, e) -> r, ExprBind(node, getMutableModifier varDecl, p, e)) >> Seq.toList) |> Option.defaultValue []
+            let bindsExpr = binds |> Option.map (Seq.map (fun (r, p, e) -> r, ExprBind(node, getMutableModifier varDecl, [p], e)) >> Seq.toList) |> Option.defaultValue []
             let initExpr = bindsExpr @ (initActions |> Seq.map descend |> Seq.toList) |> sequenceTree node
             let whileExpr =
                 let bodyRes, bodyExpr = [descend stmt] @ (postActions |> Seq.map descend |> Seq.toList) |> sequenceTree node

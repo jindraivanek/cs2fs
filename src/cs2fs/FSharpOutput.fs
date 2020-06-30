@@ -213,7 +213,7 @@ let getExprMain errorPrinter e =
         | true, true -> Text (header + " rec ")
         | true, false -> Text "and "
         | _ -> Text (header + " ")
-        |++| getModifiers modifiers |++| getPat p |++| Text " = " |++| (getExprM e |> removeTopParen)
+        |++| getModifiers modifiers |++| (p |> Seq.map getPat |> delimText " ") |++| Text " = " |++| (getExprM e |> removeTopParen)
 
     and getExpr (e:Expr<'a>) =
         match e with
