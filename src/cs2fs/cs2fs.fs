@@ -267,7 +267,8 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         | MethodDeclarationSyntax(arity,attrs,returnType,interfaceS,SyntaxToken ident,typePars,parsIn,typeParsConstrs,block,arrowExpr,_) as n -> 
             let gs = getGenerics typePars
             let (pars, optionalParExprs) = printParamaterList (classGenerics @ gs) parsIn
-            let blockRes, block = descend block
+            let body = if not (isNull arrowExpr) then arrowExpr.Expression :> SyntaxNode else block :> SyntaxNode
+            let blockRes, block = descend body
 
             blockRes,
             [ 
