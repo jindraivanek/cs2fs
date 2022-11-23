@@ -406,7 +406,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         | AnonymousMethodExpressionSyntax(_, _, _, pars, body) -> let res, desc = descend body in res, ExprLambda (node, [printParamaterList [] pars |> fst], desc)
         | LocalFunctionStatementSyntax(SyntaxToken ident, typ, typPar, pars, clauses, body, arrowExpr) ->
             let modifiers = getModifiers node
-            let res, desc = descend body
+            let res, desc = if not (isNull arrowExpr) then descend arrowExpr else descend body
             res, ExprBind (node, modifiers, mkPatBind node ident :: [printParamaterList [] pars |> fst], desc)
         | InvocationExpressionSyntax(e, args) -> 
             let res, desc = descend e 
