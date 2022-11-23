@@ -554,17 +554,26 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             ExprInfixApp(node, e1, ValId "?.", e2)
         | TryStatementSyntax (_, body, catches, finallyBody) -> 
             let getMatch = function
-                | CatchClauseSyntax (_, CatchDeclarationSyntax(_,t,tok,_), filter, block) as catchNode ->
+                | CatchClauseSyntax (_, catchDecl, filter, block) as catchNode ->
                     let exprFilter = match filter with |CatchFilterClauseSyntax(_,_,x,_) -> Some x |_ -> None
-                    let ident = let x = tok.ValueText in if String.isNullOrEmpty x then PatWildcard catchNode else mkPatBind catchNode x
-                    let typeCheckPat = function 
-                        | PatWithType(ctx, t, PatWildcard ctx1) -> PatWithType(ctx, t, PatWildcard ctx1)
-                        | PatWithType(ctx, t, PatBind (ctx1, x)) -> PatBindAs(ctx, x, PatWithType(ctx1, t, PatWildcard ctx1))
-                        | x -> failwithf "Unexpected case %A" x
+                    let basePat =
+                        match catchDecl with
+                        | CatchDeclarationSyntax(_,t,tok,_) ->
+                            let ident =
+                                let x = tok.ValueText in
+                                if String.isNullOrEmpty x then PatWildcard catchNode
+                                else mkPatBind catchNode x
+                            let typeCheckPat = function 
+                                | PatWithType(ctx, t, PatWildcard ctx1) -> PatWithType(ctx, t, PatWildcard ctx1)
+                                | PatWithType(ctx, t, PatBind (ctx1, x)) -> PatBindAs(ctx, x, PatWithType(ctx1, t, PatWildcard ctx1))
+                                | x -> failwithf "Unexpected case %A" x
+                            ident |> getTypePat (set[]) t |> typeCheckPat
+                        | null -> PatWildcard catchNode
+
                     let exprFilterO = exprFilter |> Option.map descend
                     let blockRes, block = descend block
                     [ yield Some blockRes; yield exprFilterO |> Option.map fst ] |> Seq.choose id |> collectResults,
-                    (catchNode, ident |> getTypePat (set[]) t |> typeCheckPat, exprFilterO |> Option.map snd, block)
+                    (catchNode, basePat, exprFilterO |> Option.map snd, block)
 
             let catches = catches |> List.map getMatch
             let finallyBodyO = finallyBody |> Option.ofObj |> Option.map descend
