@@ -472,7 +472,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
         
         | IdentifierNameSyntax(SyntaxToken text) as n -> 
             let identInfo = model.GetSymbolInfo (n:SyntaxNode)
-            let thisClassName = getParentOfType<Syntax.ClassDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text.Trim())
+            let thisClassName = getParentOfType<Syntax.TypeDeclarationSyntax> n |> Option.get |> (fun c -> c.Identifier.Text.Trim())
             let isThis = 
                 identInfo.Symbol |> Option.ofObj
                 |> Option.bind (fun symbol -> Option.ofObj symbol.ContainingSymbol)
