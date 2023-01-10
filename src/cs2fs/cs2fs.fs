@@ -573,6 +573,7 @@ let rec convertNode tryImplicitConv (model: SemanticModel) (node: SyntaxNode) : 
             [ yield! catches |> Seq.map (fst >> Some); yield finallyBodyO |> Option.map fst; yield Some bodyRes ] |> Seq.choose id |> collectResults,
             ExprTry(node, body, catches |> List.map snd, finallyBodyO |> Option.map snd)
         | FinallyClauseSyntax (_,body) -> descend body
+        | ThrowStatementSyntax (_, null, _) -> ConvertResults.Empty, ExprApp (node, mkExprVal node "reraise", mkExprVal node "()")
         | ThrowStatementSyntax (_, e, _) -> let res, desc = descend e in res, ExprApp (node, mkExprVal node "raise", desc)
         | ArrayCreationExpressionSyntax(t, rs, InitializerExpressionSyntax([]))
         | ArrayCreationExpressionSyntax(t, rs, null) ->
